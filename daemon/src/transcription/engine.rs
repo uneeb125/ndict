@@ -58,7 +58,7 @@ impl WhisperEngine {
 
         debug!("Transcribing {} audio samples", audio.len());
 
-        let audio = self.pad_audio(audio, 16000);
+        let audio = self.pad_audio(audio, 18000);
 
         let ctx = self
             .context
