@@ -136,6 +136,57 @@ impl DaemonServer {
                 info!("SetLanguage not yet implemented");
                 Response::Ok
             }
+            Command::Toggle => {
+                let status = state.lock().await.get_status().await;
+
+                if status.is_active {
+                    info!("Toggling: active -> stopping");
+                    let mut state_guard = state.lock().await;
+                    state_guard.stop_vad_processing().await;
+                    if let Some(capture) = state_guard.audio_capture.lock().await.as_mut() {
+                        capture.stop().await?;
+                    }
+                    *state_guard.audio_capture.lock().await = None;
+                    *state_guard.audio_rx.lock().await = None;
+                    *state_guard.whisper_engine.lock().await = None;
+                    *state_guard.virtual_keyboard.lock().await = None;
+                    state_guard.deactivate().await?;
+                    info!("Deactivated audio capture");
+                    Response::Ok
+                } else {
+                    info!("Toggling: inactive -> starting");
+                    let mut state_guard = state.lock().await;
+                    state_guard.activate().await?;
+
+                    if state_guard.audio_capture.lock().await.is_some() {
+                        return Err(anyhow::anyhow!("Audio capture already running"));
+                    }
+
+                    let mut new_capture = AudioCapture::new()?;
+                    let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
+                    new_capture.start(audio_tx)?;
+                    *state_guard.audio_capture.lock().await = Some(new_capture);
+                    *state_guard.audio_rx.lock().await = Some(audio_rx);
+
+                    let mut whisper_engine = WhisperEngine::new()?;
+                    whisper_engine.load_model().await?;
+                    *state_guard.whisper_engine.lock().await = Some(whisper_engine);
+
+                    let virtual_keyboard = VirtualKeyboard::new()?;
+                    *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+
+                    debug!("Audio capture started, VAD, Whisper, and Keyboard ready");
+
+                    debug!("Audio capture started, starting VAD and Whisper processing");
+                    if let Err(e) = state_guard.start_vad_processing().await {
+                        error!("Failed to start VAD and Whisper processing: {}", e);
+                        return Err(anyhow::anyhow!("{}", e));
+                    }
+
+                    info!("Activated audio capture");
+                    Response::Ok
+                }
+            }
         };
 
         let response_json = serde_json::to_vec(&response)?;

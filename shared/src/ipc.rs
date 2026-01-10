@@ -9,6 +9,7 @@ pub enum Command {
     Resume,
     Status,
     SetLanguage(String),
+    Toggle,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

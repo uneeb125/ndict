@@ -21,6 +21,7 @@ enum Commands {
     Resume,
     Status,
     Test,
+    Toggle,
 }
 
 #[tokio::main]
@@ -35,6 +36,7 @@ async fn main() -> Result<()> {
         Commands::Resume => Command::Resume,
         Commands::Status => Command::Status,
         Commands::Test => Command::SetLanguage("test".to_string()),
+        Commands::Toggle => Command::Toggle,
     };
 
     match client.send_command(command).await {
