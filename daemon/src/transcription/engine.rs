@@ -63,10 +63,12 @@ impl WhisperEngine {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("WhisperContext not initialized"))?;
 
+        debug!("Creating Whisper state...");
         let mut state = ctx
             .create_state()
             .map_err(|e| anyhow::anyhow!("Failed to create state: {}", e))?;
 
+        debug!("Setting transcription parameters...");
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -74,14 +76,17 @@ impl WhisperEngine {
         params.set_print_timestamps(false);
         params.set_language(Some("en"));
 
+        debug!("Running Whisper transcription...");
         state
             .full(params, audio)
             .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
 
+        debug!("Whisper transcription complete, getting segments...");
         let num_segments = state
             .full_n_segments()
             .map_err(|e| anyhow::anyhow!("Failed to get segments: {}", e))?;
 
+        debug!("Extracting {} text segments...", num_segments);
         let mut transcription = String::new();
         for i in 0..num_segments {
             if let Ok(segment) = state.full_get_segment_text(i) {

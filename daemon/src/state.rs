@@ -85,35 +85,83 @@ impl DaemonState {
                         );
                         if let Some(speech_audio) = speech_detector.process_audio(&samples) {
                             tracing::info!(
-                                "Speech detected, would transcribe: {} samples",
+                                "Speech detected, starting transcription: {} samples",
                                 speech_audio.len()
                             );
 
                             let engine_ref = whisper_engine.clone();
                             let keyboard_ref = virtual_keyboard.clone();
                             tokio::spawn(async move {
-                                let mut engine_lock = engine_ref.lock().await;
-                                if let Some(ref mut engine) = *engine_lock {
-                                    match engine.transcribe(&speech_audio).await {
-                                        Ok(text) => {
-                                            let post_processed =
-                                                transcription::post_process_transcription(&text);
-                                            tracing::info!(
-                                                "Transcription result: '{}'",
+                                tracing::debug!(
+                                    "Starting Whisper transcription for {} samples",
+                                    speech_audio.len()
+                                );
+
+                                let transcription_result = tokio::time::timeout(
+                                    tokio::time::Duration::from_secs(30),
+                                    async {
+                                        let mut engine_lock = engine_ref.lock().await;
+                                        if let Some(ref mut engine) = *engine_lock {
+                                            engine.transcribe(&speech_audio).await
+                                        } else {
+                                            Err(anyhow::anyhow!("Whisper engine not available"))
+                                        }
+                                    },
+                                )
+                                .await;
+
+                                match transcription_result {
+                                    Ok(Ok(text)) => {
+                                        tracing::debug!("Finished Whisper transcription");
+                                        let post_processed =
+                                            transcription::post_process_transcription(&text);
+                                        tracing::info!(
+                                            "Transcription result: '{}'",
+                                            post_processed
+                                        );
+
+                                        let mut keyboard_lock = keyboard_ref.lock().await;
+                                        if let Some(ref mut keyboard) = *keyboard_lock {
+                                            tracing::debug!(
+                                                "Starting keyboard typing for: '{}'",
                                                 post_processed
                                             );
+                                            let typing_result = tokio::time::timeout(
+                                                tokio::time::Duration::from_secs(5),
+                                                async {
+                                                    let result =
+                                                        keyboard.type_text(&post_processed);
+                                                    Ok::<_, anyhow::Error>(result)
+                                                },
+                                            )
+                                            .await;
 
-                                            let mut keyboard_lock = keyboard_ref.lock().await;
-                                            if let Some(ref mut keyboard) = *keyboard_lock {
-                                                if let Err(e) = keyboard.type_text(&post_processed)
-                                                {
+                                            match typing_result {
+                                                Ok(Ok(_)) => {
+                                                    tracing::info!("Successfully typed text");
+                                                    tracing::debug!("Finished keyboard typing");
+                                                }
+                                                Ok(Err(e)) => {
                                                     tracing::error!("Keyboard typing error: {}", e);
                                                 }
+                                                Err(_) => {
+                                                    tracing::error!(
+                                                        "Keyboard typing operation timed out after 5 seconds"
+                                                    );
+                                                }
                                             }
+                                        } else {
+                                            tracing::warn!("Virtual keyboard not available");
                                         }
-                                        Err(e) => {
-                                            tracing::error!("Transcription error: {}", e);
-                                        }
+                                    }
+                                    Ok(Err(e)) => {
+                                        tracing::error!("Transcription error: {}", e);
+                                        tracing::debug!("Whisper transcription failed");
+                                    }
+                                    Err(_) => {
+                                        tracing::error!(
+                                            "Whisper transcription operation timed out after 30 seconds"
+                                        );
                                     }
                                 }
                             });
