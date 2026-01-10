@@ -85,6 +85,7 @@ impl DaemonServer {
                 let mut new_capture = AudioCapture::new()?;
                 let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
                 new_capture.start(audio_tx)?;
+                *state_guard.audio_capture.lock().await = Some(new_capture);
                 *state_guard.audio_rx.lock().await = Some(audio_rx);
                 debug!("Audio capture started, VAD, Whisper, and Keyboard ready");
 
@@ -100,6 +101,9 @@ impl DaemonServer {
             Command::Stop => {
                 let mut state_guard = state.lock().await;
                 state_guard.stop_vad_processing().await;
+                if let Some(capture) = state_guard.audio_capture.lock().await.as_mut() {
+                    capture.stop().await?;
+                }
                 state_guard.deactivate().await?;
                 info!("Deactivated audio capture");
                 Response::Ok

@@ -64,11 +64,18 @@ impl DaemonState {
         let vad_task = tokio::spawn(async move {
             tracing::info!("VAD processing task started");
 
-            let mut speech_detector = SpeechDetector::new(0.5, 500).unwrap();
+            let mut speech_detector = SpeechDetector::new(0.01, 500).unwrap();
 
             loop {
                 match audio_rx.recv().await {
                     Ok(samples) => {
+                        tracing::debug!(
+                            "Received audio chunk: {} samples, first 3 values: {:.4}, {:.4}, {:.4}",
+                            samples.len(),
+                            samples.first().unwrap_or(&0.0),
+                            samples.get(1).unwrap_or(&0.0),
+                            samples.get(2).unwrap_or(&0.0)
+                        );
                         if let Some(speech_audio) = speech_detector.process_audio(&samples) {
                             tracing::info!(
                                 "Speech detected, would transcribe: {} samples",

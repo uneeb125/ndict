@@ -33,8 +33,8 @@ impl VoiceActivityDetector {
             return 0.0;
         }
 
-        let sum: f32 = samples.iter().map(|s| s.abs()).sum();
-        let rms = (sum / samples.len() as f32).sqrt();
+        let sum_squares: f32 = samples.iter().map(|s| s * s).sum();
+        let rms = (sum_squares / samples.len() as f32).sqrt();
 
         rms
     }
