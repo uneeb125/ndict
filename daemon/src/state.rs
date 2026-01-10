@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 const VAD_THRESHOLD: f32 = 0.01;
-const SILENCE_DURATION_MS: u32 = 500;
+const SILENCE_DURATION_MS: u32 = 1000;
 
 pub struct DaemonState {
     pub is_active: Arc<Mutex<bool>>,
@@ -56,8 +56,7 @@ impl DaemonState {
     pub async fn start_vad_processing(&self) -> anyhow::Result<()> {
         let audio_rx_option: Option<broadcast::Receiver<Vec<f32>>> =
             self.audio_rx.lock().await.take();
-        let whisper_engine: Option<crate::transcription::engine::WhisperEngine> =
-            self.whisper_engine.lock().await.clone();
+        let whisper_engine = self.whisper_engine.clone();
 
         if audio_rx_option.is_none() {
             return Err(anyhow::anyhow!("Audio receiver not available"));
@@ -86,22 +85,25 @@ impl DaemonState {
                                 speech_audio.len()
                             );
 
-                            if let Some(engine) = &whisper_engine {
-                                let mut engine_clone = engine.clone();
-                                match engine_clone.transcribe(&speech_audio).await {
-                                    Ok(text) => {
-                                        let post_processed =
-                                            transcription::post_process_transcription(&text);
-                                        tracing::info!(
-                                            "Transcription result: '{}'",
-                                            post_processed
-                                        );
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Transcription error: {}", e);
+                            let engine_ref = whisper_engine.clone();
+                            tokio::spawn(async move {
+                                let mut engine_lock = engine_ref.lock().await;
+                                if let Some(ref mut engine) = *engine_lock {
+                                    match engine.transcribe(&speech_audio).await {
+                                        Ok(text) => {
+                                            let post_processed =
+                                                transcription::post_process_transcription(&text);
+                                            tracing::info!(
+                                                "Transcription result: '{}'",
+                                                post_processed
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Transcription error: {}", e);
+                                        }
                                     }
                                 }
-                            }
+                            });
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {

@@ -87,6 +87,11 @@ impl DaemonServer {
                 new_capture.start(audio_tx)?;
                 *state_guard.audio_capture.lock().await = Some(new_capture);
                 *state_guard.audio_rx.lock().await = Some(audio_rx);
+
+                let mut whisper_engine = WhisperEngine::new()?;
+                whisper_engine.load_model().await?;
+                *state_guard.whisper_engine.lock().await = Some(whisper_engine);
+
                 debug!("Audio capture started, VAD, Whisper, and Keyboard ready");
 
                 debug!("Audio capture started, starting VAD and Whisper processing");

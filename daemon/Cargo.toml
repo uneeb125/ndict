@@ -14,5 +14,8 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 cpal = "0.15"
-whisper-rs = "0.11"
+whisper-rs = "0.13"
 mouse-keyboard-input = "0.4"
+dirs = "5.0"
+reqwest = { version = "0.11", features = ["stream", "rustls-tls"], default-features = false }
+futures-util = "0.3"
