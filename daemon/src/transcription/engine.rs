@@ -58,6 +58,8 @@ impl WhisperEngine {
 
         debug!("Transcribing {} audio samples", audio.len());
 
+        let audio = self.pad_audio(audio, 16000);
+
         let ctx = self
             .context
             .as_ref()
@@ -78,7 +80,7 @@ impl WhisperEngine {
 
         debug!("Running Whisper transcription...");
         state
-            .full(params, audio)
+            .full(params, &audio)
             .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
 
         debug!("Whisper transcription complete, getting segments...");
@@ -101,6 +103,26 @@ impl WhisperEngine {
         debug!("Transcription: '{}' ({} ms)", cleaned, duration_ms);
 
         Ok(cleaned)
+    }
+
+    fn pad_audio(&self, audio: &[f32], sample_rate: u32) -> Vec<f32> {
+        let min_samples = sample_rate as usize;
+        if audio.len() >= min_samples {
+            return audio.to_vec();
+        }
+
+        let padding_len = min_samples - audio.len();
+        debug!(
+            "Padding audio: {} samples + {} samples of silence = {} samples ({} ms)",
+            audio.len(),
+            padding_len,
+            min_samples,
+            (min_samples * 1000) / sample_rate as usize
+        );
+
+        let mut padded = audio.to_vec();
+        padded.extend(std::iter::repeat(0.0).take(padding_len));
+        padded
     }
 
     pub fn is_model_loaded(&self) -> bool {
