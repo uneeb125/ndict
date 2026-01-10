@@ -22,6 +22,11 @@ pub struct SpeechDetector {
 impl SpeechDetector {
     pub fn new(threshold: f32, silence_duration_ms: u32) -> anyhow::Result<Self> {
         let vad = VoiceActivityDetector::new(threshold)?;
+        tracing::info!(
+            "SpeechDetector initialized: threshold={:.4}, silence_duration_ms={}",
+            threshold,
+            silence_duration_ms
+        );
 
         Ok(Self {
             state: SpeechState::Idle,

@@ -8,6 +8,9 @@ use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+const VAD_THRESHOLD: f32 = 0.01;
+const SILENCE_DURATION_MS: u32 = 500;
+
 pub struct DaemonState {
     pub is_active: Arc<Mutex<bool>>,
     pub audio_capture: Arc<Mutex<Option<AudioCapture>>>,
@@ -64,7 +67,8 @@ impl DaemonState {
         let vad_task = tokio::spawn(async move {
             tracing::info!("VAD processing task started");
 
-            let mut speech_detector = SpeechDetector::new(0.01, 500).unwrap();
+            let mut speech_detector =
+                SpeechDetector::new(VAD_THRESHOLD, SILENCE_DURATION_MS).unwrap();
 
             loop {
                 match audio_rx.recv().await {
