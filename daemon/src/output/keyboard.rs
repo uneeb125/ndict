@@ -9,7 +9,7 @@ pub struct VirtualKeyboard {
 impl VirtualKeyboard {
     pub fn new() -> Result<Self> {
         info!("Creating VirtualKeyboard using wrtype");
-        
+
         // Initialize the Wayland virtual keyboard client
         let client = WrtypeClient::new()
             .map_err(|e| anyhow::anyhow!("Failed to create WrtypeClient: {:?}", e))?;
