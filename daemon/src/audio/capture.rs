@@ -13,11 +13,10 @@ pub struct AudioCapture {
     stream: Option<Box<Stream>>,
     audio_tx: Arc<Mutex<Option<broadcast::Sender<Vec<f32>>>>>,
     is_running: Arc<Mutex<bool>>,
-    gain: Arc<Mutex<f32>>,
 }
 
 impl AudioCapture {
-    pub fn new(gain: f32) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -25,7 +24,6 @@ impl AudioCapture {
 
         tracing::info!("Audio capture initialized");
         tracing::info!("Using input device: {}", device.name()?);
-        tracing::info!("Audio gain: {}", gain);
 
         Ok(Self {
             host,
@@ -33,7 +31,6 @@ impl AudioCapture {
             stream: None,
             audio_tx: Arc::new(Mutex::new(None)),
             is_running: Arc::new(Mutex::new(false)),
-            gain: Arc::new(Mutex::new(gain)),
         })
     }
 
@@ -75,7 +72,6 @@ impl AudioCapture {
 
         let audio_tx = Arc::clone(&self.audio_tx);
         let is_running = Arc::clone(&self.is_running);
-        let gain = Arc::clone(&self.gain);
 
         let error_callback = |err| {
             tracing::error!("Audio stream error: {}", err);
@@ -91,7 +87,7 @@ impl AudioCapture {
                 let stream = device.build_input_stream(
                     &final_config,
                     move |data: &[f32], _: &_| {
-                        Self::process_audio_chunk(data, &audio_tx, &is_running, &gain);
+                        Self::process_audio_chunk(data, &audio_tx, &is_running);
                     },
                     error_callback,
                     None,
@@ -104,7 +100,7 @@ impl AudioCapture {
                     move |data: &[i16], _: &_| {
                         let converted: Vec<f32> =
                             data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                        Self::process_audio_chunk(&converted, &audio_tx, &is_running, &gain);
+                        Self::process_audio_chunk(&converted, &audio_tx, &is_running);
                     },
                     error_callback,
                     None,
@@ -119,7 +115,7 @@ impl AudioCapture {
                             .iter()
                             .map(|&s| (s as i16 as f32) / i16::MAX as f32)
                             .collect();
-                        Self::process_audio_chunk(&converted, &audio_tx, &is_running, &gain);
+                        Self::process_audio_chunk(&converted, &audio_tx, &is_running);
                     },
                     error_callback,
                     None,
@@ -142,14 +138,11 @@ impl AudioCapture {
         data: &[f32],
         audio_tx: &Arc<Mutex<Option<broadcast::Sender<Vec<f32>>>>>,
         is_running: &Arc<Mutex<bool>>,
-        gain: &Arc<Mutex<f32>>,
     ) {
         if is_running.try_lock().map(|g| *g).unwrap_or(false) {
             if let Ok(tx) = audio_tx.try_lock() {
                 if let Some(sender) = tx.as_ref() {
-                    let gain_value = *gain.lock().unwrap();
-                    let amplified: Vec<f32> = data.iter().map(|&s| s * gain_value).collect();
-                    let _ = sender.send(amplified);
+                    let _ = sender.send(data.to_vec());
                 }
             }
         }

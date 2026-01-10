@@ -63,6 +63,7 @@ impl DaemonState {
         let virtual_keyboard = self.virtual_keyboard.clone();
         let vad_threshold = self.config.vad.threshold;
         let silence_duration_ms = self.config.vad.min_silence_duration_ms;
+        let gain = self.config.audio.gain;
 
         if audio_rx_option.is_none() {
             return Err(anyhow::anyhow!("Audio receiver not available"));
@@ -73,7 +74,7 @@ impl DaemonState {
             tracing::info!("VAD processing task started");
 
             let mut speech_detector =
-                SpeechDetector::new(vad_threshold, silence_duration_ms).unwrap();
+                SpeechDetector::new(vad_threshold, silence_duration_ms, gain).unwrap();
 
             loop {
                 match audio_rx.recv().await {

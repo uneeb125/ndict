@@ -17,15 +17,17 @@ pub struct SpeechDetector {
     silence_start_time: Option<Instant>,
     speech_buffer: Vec<f32>,
     silence_duration_ms: u32,
+    gain: f32,
 }
 
 impl SpeechDetector {
-    pub fn new(threshold: f32, silence_duration_ms: u32) -> anyhow::Result<Self> {
+    pub fn new(threshold: f32, silence_duration_ms: u32, gain: f32) -> anyhow::Result<Self> {
         let vad = VoiceActivityDetector::new(threshold)?;
         tracing::info!(
-            "SpeechDetector initialized: threshold={:.4}, silence_duration_ms={}",
+            "SpeechDetector initialized: threshold={:.4}, silence_duration_ms={}, gain={:.2}",
             threshold,
-            silence_duration_ms
+            silence_duration_ms,
+            gain
         );
 
         Ok(Self {
@@ -35,6 +37,7 @@ impl SpeechDetector {
             silence_start_time: None,
             speech_buffer: Vec::new(),
             silence_duration_ms,
+            gain,
         })
     }
 
@@ -82,7 +85,10 @@ impl SpeechDetector {
                         duration_ms,
                         speech.len()
                     );
-                    return Some(speech);
+                    // Apply gain before sending to Whisper
+                    let amplified_speech: Vec<f32> =
+                        speech.iter().map(|&s| s * self.gain).collect();
+                    return Some(amplified_speech);
                 }
             }
         }
