@@ -1,4 +1,5 @@
 mod audio;
+mod output;
 mod server;
 mod state;
 mod transcription;

@@ -4,12 +4,12 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
-use crate::{
-    audio::capture::AudioCapture, state::DaemonState, transcription::engine::WhisperEngine,
-    vad::speech_detector::SpeechDetector,
-};
+use crate::audio::capture::AudioCapture;
+use crate::output::keyboard::VirtualKeyboard;
+use crate::state::DaemonState;
+use crate::transcription::engine::WhisperEngine;
 
 const SOCKET_PATH: &str = "/tmp/ndictd.sock";
 
@@ -78,33 +78,15 @@ impl DaemonServer {
                 let mut state_guard = state.lock().await;
                 state_guard.activate().await?;
 
-                let mut audio_capture = state_guard.audio_capture.lock().await;
-                if let Some(capture) = audio_capture.as_mut() {
-                    let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
-                    capture.start(audio_tx)?;
-                    *state_guard.audio_rx.lock().await = Some(audio_rx);
-
-                    let mut whisper_engine = transpection::engine::WhisperEngine::new()?;
-
-                    if !whisper_engine.is_model_loaded() {
-                        if let Err(e) = whisper_engine.load_model().await {
-                            drop(audio_capture);
-                            drop(state_guard);
-                            return Err(anyhow::anyhow!("Failed to load Whisper model: {}", e));
-                        }
-                    }
-
-                    *state_guard.whisper_engine.lock().await = Some(whisper_engine);
-
-                    debug!("Audio capture started, VAD and Whisper ready");
-                } else {
-                    drop(audio_capture);
-                    drop(state_guard);
+                if state_guard.audio_capture.lock().await.is_some() {
                     return Err(anyhow::anyhow!("Audio capture already running"));
                 }
 
-                drop(audio_capture);
-                drop(state_guard);
+                let mut new_capture = AudioCapture::new()?;
+                let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
+                new_capture.start(audio_tx)?;
+                *state_guard.audio_rx.lock().await = Some(audio_rx);
+                debug!("Audio capture started, VAD, Whisper, and Keyboard ready");
 
                 debug!("Audio capture started, starting VAD and Whisper processing");
                 if let Err(e) = state_guard.start_vad_processing().await {
@@ -116,10 +98,9 @@ impl DaemonServer {
                 Response::Ok
             }
             Command::Stop => {
-                let state_guard = state.lock().await;
+                let mut state_guard = state.lock().await;
                 state_guard.stop_vad_processing().await;
                 state_guard.deactivate().await?;
-                drop(state_guard);
                 info!("Deactivated audio capture");
                 Response::Ok
             }
