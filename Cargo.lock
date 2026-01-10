@@ -1076,6 +1076,7 @@ dependencies = [
  "dirs",
  "enigo",
  "futures-util",
+ "regex",
  "reqwest",
  "serde",
  "serde_derive",

@@ -17,6 +17,11 @@ pub fn post_process_transcription(text: &str) -> String {
     text = text.replace("  ", " ");
     text = text.trim().to_string();
 
+    let re = regex::Regex::new(r"\[.*?\]|\{.*?\}|\(.*?\)").unwrap();
+    text = re.replace_all(&text, "").to_string();
+    text = text.replace("  ", " ");
+    text = text.trim().to_string();
+
     tracing::debug!("Post-processed: '{}' -> '{}'", text.trim(), text);
 
     text
