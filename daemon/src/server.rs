@@ -112,6 +112,10 @@ impl DaemonServer {
                 if let Some(capture) = state_guard.audio_capture.lock().await.as_mut() {
                     capture.stop().await?;
                 }
+                *state_guard.audio_capture.lock().await = None;
+                *state_guard.audio_rx.lock().await = None;
+                *state_guard.whisper_engine.lock().await = None;
+                *state_guard.virtual_keyboard.lock().await = None;
                 state_guard.deactivate().await?;
                 info!("Deactivated audio capture");
                 Response::Ok
