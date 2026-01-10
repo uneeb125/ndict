@@ -112,7 +112,7 @@ sleep 1
 if systemctl --user is-active --quiet "$SERVICE_NAME"; then
     echo -e "${GREEN}Success! Installation complete.${NC}"
     echo "Daemon is running in the background."
-    echo "You can now use the CLI command: ${GREEN}$CLI_NAME <args>${NC}"
+    echo -e "You can now use the CLI command: ${GREEN}$CLI_NAME <args>${NC}"
 else
     echo -e "${RED}Daemon failed to start.${NC}"
     systemctl --user status "$SERVICE_NAME" --no-pager
