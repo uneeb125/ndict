@@ -1,4 +1,5 @@
 use crate::audio::capture::AudioCapture;
+use crate::config::Config;
 use crate::output::VirtualKeyboard;
 use crate::transcription;
 use crate::transcription::engine::WhisperEngine;
@@ -9,10 +10,8 @@ use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-const VAD_THRESHOLD: f32 = 0.01;
-const SILENCE_DURATION_MS: u32 = 1000;
-
 pub struct DaemonState {
+    pub config: Config,
     pub is_active: Arc<Mutex<bool>>,
     pub audio_capture: Arc<Mutex<Option<AudioCapture>>>,
     pub speech_detector: Arc<Mutex<Option<SpeechDetector>>>,
@@ -23,8 +22,9 @@ pub struct DaemonState {
 }
 
 impl DaemonState {
-    pub fn new() -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
+            config,
             is_active: Arc::new(Mutex::new(false)),
             audio_capture: Arc::new(Mutex::new(None)),
             speech_detector: Arc::new(Mutex::new(None)),
@@ -52,7 +52,7 @@ impl DaemonState {
         StatusInfo {
             is_running: true,
             is_active,
-            language: "auto".to_string(),
+            language: self.config.whisper.language.clone(),
         }
     }
 
@@ -61,6 +61,8 @@ impl DaemonState {
             self.audio_rx.lock().await.take();
         let whisper_engine = self.whisper_engine.clone();
         let virtual_keyboard = self.virtual_keyboard.clone();
+        let vad_threshold = self.config.vad.threshold;
+        let silence_duration_ms = self.config.vad.min_silence_duration_ms;
 
         if audio_rx_option.is_none() {
             return Err(anyhow::anyhow!("Audio receiver not available"));
@@ -71,7 +73,7 @@ impl DaemonState {
             tracing::info!("VAD processing task started");
 
             let mut speech_detector =
-                SpeechDetector::new(VAD_THRESHOLD, SILENCE_DURATION_MS).unwrap();
+                SpeechDetector::new(vad_threshold, silence_duration_ms).unwrap();
 
             loop {
                 match audio_rx.recv().await {

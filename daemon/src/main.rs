@@ -1,4 +1,5 @@
 mod audio;
+mod config;
 mod output;
 mod server;
 mod state;
@@ -6,6 +7,7 @@ mod transcription;
 mod vad;
 
 use anyhow::Result;
+use config::Config;
 use server::DaemonServer;
 use state::DaemonState;
 use std::sync::Arc;
@@ -23,7 +25,8 @@ async fn main() -> Result<()> {
 
     info!("ndict daemon (ndictd) starting...");
 
-    let daemon_state = DaemonState::new();
+    let config = config::load_config()?;
+    let daemon_state = DaemonState::new(config);
     let state = Arc::new(Mutex::new(daemon_state));
 
     let server = DaemonServer::new("/tmp/ndictd.sock".into(), state);
