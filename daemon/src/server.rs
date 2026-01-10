@@ -92,6 +92,9 @@ impl DaemonServer {
                 whisper_engine.load_model().await?;
                 *state_guard.whisper_engine.lock().await = Some(whisper_engine);
 
+                let virtual_keyboard = VirtualKeyboard::new()?;
+                *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+
                 debug!("Audio capture started, VAD, Whisper, and Keyboard ready");
 
                 debug!("Audio capture started, starting VAD and Whisper processing");

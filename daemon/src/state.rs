@@ -1,4 +1,5 @@
 use crate::audio::capture::AudioCapture;
+use crate::output::VirtualKeyboard;
 use crate::transcription;
 use crate::transcription::engine::WhisperEngine;
 use crate::vad::speech_detector::SpeechDetector;
@@ -17,6 +18,7 @@ pub struct DaemonState {
     pub speech_detector: Arc<Mutex<Option<SpeechDetector>>>,
     pub audio_rx: Arc<Mutex<Option<broadcast::Receiver<Vec<f32>>>>>,
     pub whisper_engine: Arc<Mutex<Option<WhisperEngine>>>,
+    pub virtual_keyboard: Arc<Mutex<Option<VirtualKeyboard>>>,
     pub vad_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
@@ -28,6 +30,7 @@ impl DaemonState {
             speech_detector: Arc::new(Mutex::new(None)),
             audio_rx: Arc::new(Mutex::new(None)),
             whisper_engine: Arc::new(Mutex::new(None)),
+            virtual_keyboard: Arc::new(Mutex::new(None)),
             vad_task_handle: Arc::new(Mutex::new(None)),
         }
     }
@@ -57,6 +60,7 @@ impl DaemonState {
         let audio_rx_option: Option<broadcast::Receiver<Vec<f32>>> =
             self.audio_rx.lock().await.take();
         let whisper_engine = self.whisper_engine.clone();
+        let virtual_keyboard = self.virtual_keyboard.clone();
 
         if audio_rx_option.is_none() {
             return Err(anyhow::anyhow!("Audio receiver not available"));
@@ -86,6 +90,7 @@ impl DaemonState {
                             );
 
                             let engine_ref = whisper_engine.clone();
+                            let keyboard_ref = virtual_keyboard.clone();
                             tokio::spawn(async move {
                                 let mut engine_lock = engine_ref.lock().await;
                                 if let Some(ref mut engine) = *engine_lock {
@@ -97,6 +102,14 @@ impl DaemonState {
                                                 "Transcription result: '{}'",
                                                 post_processed
                                             );
+
+                                            let mut keyboard_lock = keyboard_ref.lock().await;
+                                            if let Some(ref mut keyboard) = *keyboard_lock {
+                                                if let Err(e) = keyboard.type_text(&post_processed)
+                                                {
+                                                    tracing::error!("Keyboard typing error: {}", e);
+                                                }
+                                            }
                                         }
                                         Err(e) => {
                                             tracing::error!("Transcription error: {}", e);
