@@ -82,7 +82,7 @@ impl DaemonServer {
                     return Err(anyhow::anyhow!("Audio capture already running"));
                 }
 
-                let mut new_capture = AudioCapture::new()?;
+                let mut new_capture = AudioCapture::new(state_guard.config.audio.gain)?;
                 let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
                 new_capture.start(audio_tx)?;
                 *state_guard.audio_capture.lock().await = Some(new_capture);

@@ -15,6 +15,7 @@ pub struct AudioConfig {
     pub device: String,
     pub sample_rate: u32,
     pub chunk_size: u32,
+    pub gain: f32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -43,6 +44,7 @@ impl Default for Config {
                 device: "default".to_string(),
                 sample_rate: 16000,
                 chunk_size: 512,
+                gain: 1.0,
             },
             vad: VadConfig {
                 threshold: 0.01,
