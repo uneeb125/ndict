@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
-use super::detector::{VADResult, VoiceActivityDetector};
+use super::detector::VoiceActivityDetector;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpeechState {
@@ -126,10 +126,4 @@ impl SpeechDetector {
         self.silence_start_time = None;
     }
 
-    pub fn is_speaking(&self) -> bool {
-        matches!(
-            self.state,
-            SpeechState::Speaking | SpeechState::SilenceDetected
-        )
-    }
 }

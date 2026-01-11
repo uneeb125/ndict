@@ -1,6 +1,6 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Host, SampleFormat, Stream, StreamConfig};
+use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
@@ -8,7 +8,6 @@ const SAMPLE_RATE: u32 = 16000;
 const CHANNELS: u16 = 1;
 
 pub struct AudioCapture {
-    host: Host,
     device: Option<Device>,
     stream: Option<Box<Stream>>,
     audio_tx: Arc<Mutex<Option<broadcast::Sender<Vec<f32>>>>>,
@@ -26,7 +25,6 @@ impl AudioCapture {
         tracing::info!("Using input device: {}", device.name()?);
 
         Ok(Self {
-            host,
             device: Some(device),
             stream: None,
             audio_tx: Arc::new(Mutex::new(None)),

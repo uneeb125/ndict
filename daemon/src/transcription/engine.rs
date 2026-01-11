@@ -1,14 +1,7 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{debug, info, warn};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TranscriptionResult {
-    pub text: String,
-    pub confidence: f32,
-}
 
 pub struct WhisperEngine {
     context: Option<WhisperContext>,
@@ -123,10 +116,6 @@ impl WhisperEngine {
         let mut padded = audio.to_vec();
         padded.extend(std::iter::repeat(0.0).take(padding_len));
         padded
-    }
-
-    pub fn is_model_loaded(&self) -> bool {
-        self.model_loaded
     }
 
     fn find_model_path() -> Result<PathBuf> {

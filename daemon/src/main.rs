@@ -7,13 +7,14 @@ mod transcription;
 mod vad;
 
 use anyhow::Result;
-use config::Config;
 use server::DaemonServer;
 use state::DaemonState;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
+
+const SOCKET_PATH: &str = "/tmp/ndictd.sock";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,7 +30,7 @@ async fn main() -> Result<()> {
     let daemon_state = DaemonState::new(config);
     let state = Arc::new(Mutex::new(daemon_state));
 
-    let server = DaemonServer::new("/tmp/ndictd.sock".into(), state);
+    let server = DaemonServer::new(SOCKET_PATH.into(), state);
     server.run().await?;
 
     Ok(())

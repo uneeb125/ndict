@@ -11,8 +11,6 @@ use crate::output::keyboard::VirtualKeyboard;
 use crate::state::DaemonState;
 use crate::transcription::engine::WhisperEngine;
 
-const SOCKET_PATH: &str = "/tmp/ndictd.sock";
-
 pub struct DaemonServer {
     socket_path: PathBuf,
     state: Arc<Mutex<DaemonState>>,
