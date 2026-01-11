@@ -20,9 +20,20 @@ pub struct AudioConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VadConfig {
-    pub threshold: f32,
+    #[serde(default = "default_threshold_start")]
+    pub threshold_start: f32,
+    #[serde(default = "default_threshold_stop")]
+    pub threshold_stop: f32,
     pub min_speech_duration_ms: u32,
     pub min_silence_duration_ms: u32,
+}
+
+fn default_threshold_start() -> f32 {
+    0.02
+}
+
+fn default_threshold_stop() -> f32 {
+    0.01
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -47,7 +58,8 @@ impl Default for Config {
                 gain: 1.0,
             },
             vad: VadConfig {
-                threshold: 0.01,
+                threshold_start: 0.02,
+                threshold_stop: 0.01,
                 min_speech_duration_ms: 250,
                 min_silence_duration_ms: 1000,
             },

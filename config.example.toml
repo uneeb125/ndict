@@ -1,0 +1,38 @@
+# Example configuration file for ndict speech-to-text daemon
+# Copy this to ~/.config/ndict/config.toml to customize
+
+[audio]
+# Audio device name (use "default" for system default)
+device = "default"
+# Sample rate in Hz (16kHz is recommended for Whisper)
+sample_rate = 16000
+# Number of samples per audio chunk (512 = ~32ms at 16kHz)
+chunk_size = 512
+# Audio gain multiplier (increase if microphone is too quiet)
+gain = 1.0
+
+[vad]
+# Threshold to START recording (audio level must be above this to begin)
+# Higher values = less sensitive, won't start recording for quiet sounds
+threshold_start = 0.02
+# Threshold to STOP recording (audio level must drop below this to end)
+# Lower than threshold_start to create hysteresis and prevent rapid toggling
+# Typical: threshold_stop should be 50-80% of threshold_start
+threshold_stop = 0.01
+# Minimum silence duration in ms to confirm end of speech
+min_silence_duration_ms = 1000
+# Minimum speech duration in ms to consider it valid speech
+min_speech_duration_ms = 250
+
+[whisper]
+# Whisper model to use (tiny, base, small, medium, large)
+# base is recommended for most use cases
+model = "base"
+# Optional: custom path to Whisper model file
+# model_path = "/path/to/model.ggml"
+# Language code (e.g., "en", "es", "auto" for auto-detection)
+language = "auto"
+
+[output]
+# Typing mode: "instant" or "paste"
+typing_mode = "instant"

@@ -2,23 +2,36 @@ use anyhow::Result;
 use tracing::info;
 
 pub struct VoiceActivityDetector {
-    threshold: f32,
+    threshold_start: f32,
+    threshold_stop: f32,
 }
 
 impl VoiceActivityDetector {
-    pub fn new(threshold: f32) -> Result<Self> {
-        info!("VAD initialized with threshold: {}", threshold);
+    pub fn new(threshold_start: f32, threshold_stop: f32) -> Result<Self> {
+        info!(
+            "VAD initialized with threshold_start: {}, threshold_stop: {}",
+            threshold_start, threshold_stop
+        );
 
-        Ok(Self { threshold })
+        Ok(Self {
+            threshold_start,
+            threshold_stop,
+        })
     }
 
-    pub fn detect(&self, audio_level: f32) -> VADResult {
-        let is_speech = audio_level > self.threshold;
+    pub fn detect(&self, audio_level: f32, is_speaking: bool) -> VADResult {
+        let is_speech = if is_speaking {
+            audio_level > self.threshold_stop
+        } else {
+            audio_level > self.threshold_start
+        };
 
         tracing::debug!(
-            "Audio level: {:.4}, threshold: {:.4}, is_speech: {}",
+            "Audio level: {:.4}, threshold_start: {:.4}, threshold_stop: {:.4}, is_speaking: {}, is_speech: {}",
             audio_level,
-            self.threshold,
+            self.threshold_start,
+            self.threshold_stop,
+            is_speaking,
             is_speech
         );
 

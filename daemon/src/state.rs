@@ -59,7 +59,8 @@ impl DaemonState {
             self.audio_rx.lock().await.take();
         let whisper_engine = self.whisper_engine.clone();
         let virtual_keyboard = self.virtual_keyboard.clone();
-        let vad_threshold = self.config.vad.threshold;
+        let vad_threshold_start = self.config.vad.threshold_start;
+        let vad_threshold_stop = self.config.vad.threshold_stop;
         let silence_duration_ms = self.config.vad.min_silence_duration_ms;
         let gain = self.config.audio.gain;
 
@@ -71,8 +72,13 @@ impl DaemonState {
         let vad_task = tokio::spawn(async move {
             tracing::info!("VAD processing task started");
 
-            let mut speech_detector =
-                SpeechDetector::new(vad_threshold, silence_duration_ms, gain).unwrap();
+            let mut speech_detector = SpeechDetector::new(
+                vad_threshold_start,
+                vad_threshold_stop,
+                silence_duration_ms,
+                gain,
+            )
+            .unwrap();
 
             loop {
                 match audio_rx.recv().await {

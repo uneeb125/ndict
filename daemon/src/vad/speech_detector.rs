@@ -21,11 +21,17 @@ pub struct SpeechDetector {
 }
 
 impl SpeechDetector {
-    pub fn new(threshold: f32, silence_duration_ms: u32, gain: f32) -> anyhow::Result<Self> {
-        let vad = VoiceActivityDetector::new(threshold)?;
+    pub fn new(
+        threshold_start: f32,
+        threshold_stop: f32,
+        silence_duration_ms: u32,
+        gain: f32,
+    ) -> anyhow::Result<Self> {
+        let vad = VoiceActivityDetector::new(threshold_start, threshold_stop)?;
         tracing::info!(
-            "SpeechDetector initialized: threshold={:.4}, silence_duration_ms={}, gain={:.2}",
-            threshold,
+            "SpeechDetector initialized: threshold_start={:.4}, threshold_stop={:.4}, silence_duration_ms={}, gain={:.2}",
+            threshold_start,
+            threshold_stop,
             silence_duration_ms,
             gain
         );
@@ -42,7 +48,9 @@ impl SpeechDetector {
     }
 
     pub fn process_audio(&mut self, samples: &[f32]) -> Option<Vec<f32>> {
-        let vad_result = self.vad.detect(self.vad.calculate_audio_level(samples));
+        let audio_level = self.vad.calculate_audio_level(samples);
+        let is_speaking = self.state == SpeechState::Speaking;
+        let vad_result = self.vad.detect(audio_level, is_speaking);
 
         match self.state {
             SpeechState::Idle => {
@@ -125,5 +133,4 @@ impl SpeechDetector {
         self.speech_start_time = None;
         self.silence_start_time = None;
     }
-
 }
