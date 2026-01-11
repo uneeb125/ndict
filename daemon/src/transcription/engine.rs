@@ -1,10 +1,13 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
+};
 
 pub struct WhisperEngine {
     context: Option<WhisperContext>,
+    state: Option<WhisperState>,
     model_loaded: bool,
     model_path: PathBuf,
     model_url: String,
@@ -17,6 +20,7 @@ impl WhisperEngine {
 
         Ok(Self {
             context: None,
+            state: None,
             model_loaded: false,
             model_path,
             model_url,
@@ -40,7 +44,7 @@ impl WhisperEngine {
         // This tells whisper.cpp to attempt to use the GPU offload
         params.use_gpu(true);
         // Optional: specific GPU device index (defaults to 0)
-        // params.gpu_device(0); 
+        // params.gpu_device(0);
         // --- CHANGE END ---
 
         let ctx = WhisperContext::new_with_params(
@@ -49,10 +53,17 @@ impl WhisperEngine {
         )
         .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {}", e))?;
 
+        // Create WhisperState once to maintain stable GPU memory usage
+        // This keeps compute/scratch buffers (KV cache, activation buffers) allocated
+        let state = ctx
+            .create_state()
+            .map_err(|e| anyhow::anyhow!("Failed to create Whisper state: {}", e))?;
+
         self.context = Some(ctx);
+        self.state = Some(state);
         self.model_loaded = true;
 
-        info!("Whisper model loaded successfully (GPU requested)");
+        info!("Whisper model and state loaded successfully (GPU requested, stable memory usage)");
         Ok(())
     }
 
@@ -65,15 +76,10 @@ impl WhisperEngine {
 
         let audio = self.pad_audio(audio, 18000);
 
-        let ctx = self
-            .context
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("WhisperContext not initialized"))?;
-
-        debug!("Creating Whisper state...");
-        let mut state = ctx
-            .create_state()
-            .map_err(|e| anyhow::anyhow!("Failed to create state: {}", e))?;
+        let state = self
+            .state
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("WhisperState not initialized"))?;
 
         debug!("Setting transcription parameters...");
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
