@@ -132,3 +132,75 @@ if systemctl --user is-active --quiet "$SERVICE_NAME"; then
 else
     echo -e "${RED}Daemon failed to start.${NC}"
 fi
+
+# ==========================================
+# PRETTY PRINT INSTRUCTIONS
+# ==========================================
+
+# Function to handle printing (uses bat if available, cat if not)
+print_code() {
+    local lang=$1
+    if command -v bat &> /dev/null; then
+        # --paging=never prevents it from opening 'less' and blocking the script
+        bat -l "$lang" --style=plain --paging=never
+    else
+        cat
+    fi
+}
+
+
+echo -e "\n${YELLOW}======== WAYBAR CONFIGURATION ========${NC}"
+
+echo ""
+
+
+echo "Add this to your Waybar 'config' (modules-left/right):"
+
+print_code json <<EOF
+"custom/ndict": {
+    "format": "{}",
+    "return-type": "json",
+    "interval": 1,
+    "exec": "$DEST_BIN_DIR/ndict-waybar",
+    "on-click": "$DEST_BIN_DIR/ndict-waybar toggle",
+    "signal": 8
+}
+EOF
+
+
+echo ""
+
+echo -e "${RED}Don't forget to actually enable the module${NC}"
+
+
+echo -e "\n${YELLOW}=== WAYBAR CSS ===${NC}"
+echo "Add this to your Waybar 'style.css' and adjust to taste:"
+
+print_code css <<EOF
+#custom-ndict {
+    padding: 0 10px;
+    font-weight: bold;
+}
+
+/* Stopped / Idle (Blue) */
+#custom-ndict.idle {
+    color: #89b4fa; 
+}
+
+/* Recording (Red + Blink) */
+#custom-ndict.recording {
+    color: #f38ba8; 
+    animation-name: blink;
+    animation-duration: 2s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+}
+
+@keyframes blink {
+    0% { opacity: 1.0; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1.0; }
+}
+EOF
+
+# echo -e "\n${GREEN}Installation and Instruction generation complete!${NC}"
