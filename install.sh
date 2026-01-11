@@ -94,6 +94,43 @@ EOF
 chmod +x "$DEST_BIN_DIR/$WAYBAR_SCRIPT_NAME"
 
 # ==========================================
+# CONFIG INSTALLATION
+# ==========================================
+echo ""
+echo -e "${YELLOW}======== CONFIGURATION ========${NC}"
+
+CONFIG_DIR="$HOME/.config/ndict"
+CONFIG_FILE="$CONFIG_DIR/config.toml"
+EXAMPLE_CONFIG="./config.example.toml"
+
+if [ ! -f "$EXAMPLE_CONFIG" ]; then
+    echo -e "${RED}Warning: Example config file not found at $EXAMPLE_CONFIG${NC}"
+    echo "Skipping config installation."
+else
+    # Check if config already exists
+    if [ -f "$CONFIG_FILE" ]; then
+        echo -e "${YELLOW}Config file already exists at: $CONFIG_FILE${NC}"
+        echo "Skipping config installation to avoid overwriting your settings."
+    else
+        # Ask user if they want to install default config
+        echo ""
+        read -p "Would you like to install the default configuration file? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            mkdir -p "$CONFIG_DIR"
+            cp "$EXAMPLE_CONFIG" "$CONFIG_FILE"
+            echo -e "${GREEN}Config installed to: $CONFIG_FILE${NC}"
+            echo -e "${YELLOW}You can edit this file to customize your settings.${NC}"
+        else
+            echo "Skipping config installation."
+            echo "You can install it later manually:"
+            echo "  mkdir -p ~/.config/ndict"
+            echo "  cp config.example.toml ~/.config/ndict/config.toml"
+        fi
+    fi
+fi
+
+# ==========================================
 # UPDATE SERVICE FILE
 # ==========================================
 echo "Updating systemd service..."
