@@ -35,16 +35,24 @@ impl WhisperEngine {
             self.download_model().await?;
         }
 
+        // --- CHANGE START: Configure Parameters for GPU ---
+        let mut params = WhisperContextParameters::default();
+        // This tells whisper.cpp to attempt to use the GPU offload
+        params.use_gpu(true);
+        // Optional: specific GPU device index (defaults to 0)
+        // params.gpu_device(0); 
+        // --- CHANGE END ---
+
         let ctx = WhisperContext::new_with_params(
             self.model_path.to_str().unwrap(),
-            WhisperContextParameters::default(),
+            params, // Pass the modified params here
         )
         .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {}", e))?;
 
         self.context = Some(ctx);
         self.model_loaded = true;
 
-        info!("Whisper model loaded successfully");
+        info!("Whisper model loaded successfully (GPU requested)");
         Ok(())
     }
 
@@ -81,16 +89,16 @@ impl WhisperEngine {
             .map_err(|e| anyhow::anyhow!("Transcription failed: {}", e))?;
 
         debug!("Whisper transcription complete, getting segments...");
-        let num_segments = state
-            .full_n_segments()
-            .map_err(|e| anyhow::anyhow!("Failed to get segments: {}", e))?;
+        let num_segments = state.full_n_segments();
 
         debug!("Extracting {} text segments...", num_segments);
         let mut transcription = String::new();
         for i in 0..num_segments {
-            if let Ok(segment) = state.full_get_segment_text(i) {
-                transcription.push_str(&segment);
-                transcription.push(' ');
+            if let Some(segment) = state.get_segment(i) {
+                if let Ok(text) = segment.to_str() {
+                    transcription.push_str(text);
+                    transcription.push(' ');
+                }
             }
         }
 

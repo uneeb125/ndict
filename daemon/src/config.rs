@@ -42,6 +42,12 @@ pub struct WhisperConfig {
     pub model_path: Option<String>,
     pub model_url: String,
     pub language: String,
+    #[serde(default = "default_gpu_backend")]
+    pub gpu_backend: String,
+}
+
+fn default_gpu_backend() -> String {
+    "cpu".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -71,6 +77,7 @@ impl Default for Config {
                     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
                         .to_string(),
                 language: "auto".to_string(),
+                gpu_backend: "cpu".to_string(),
             },
             output: OutputConfig {
                 typing_mode: "instant".to_string(),
