@@ -160,7 +160,7 @@ EOF
 # ==========================================
 systemctl --user daemon-reload
 systemctl --user enable "$SERVICE_NAME"
-systemctl --user restart "$SERVICE_NAME"
+systemctl --user start "$SERVICE_NAME"
 
 sleep 1
 if systemctl --user is-active --quiet "$SERVICE_NAME"; then
