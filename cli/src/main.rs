@@ -47,6 +47,7 @@ async fn main() -> Result<()> {
             println!("Status:");
             println!("  Running: {}", info.is_running);
             println!("  Active: {}", info.is_active);
+            println!("  Paused: {}", info.is_paused);
             println!("  Language: {}", info.language);
         }
         Ok(Response::Error(msg)) => {

@@ -27,7 +27,8 @@ async fn main() -> Result<()> {
     info!("ndict daemon (ndictd) starting...");
 
     let config = config::load_config()?;
-    let daemon_state = DaemonState::new(config);
+    let mut daemon_state = DaemonState::new(config);
+    daemon_state.initialize_startup().await?;
     let state = Arc::new(Mutex::new(daemon_state));
 
     let server = DaemonServer::new(SOCKET_PATH.into(), state);

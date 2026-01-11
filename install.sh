@@ -69,11 +69,11 @@ STATE_FILE="/tmp/ndict.state"
 if [ "\$1" == "toggle" ]; then
     if [ -f "\$STATE_FILE" ]; then
         # Currently running, so STOP it
-        $HOME/.local/bin/ndict stop
+        $HOME/.local/bin/ndict pause
         rm -f "\$STATE_FILE"
     else
         # Currently stopped, so START it
-        $HOME/.local/bin/ndict start
+        $HOME/.local/bin/ndict resume
         touch "\$STATE_FILE"
     fi
     # Send signal to waybar to update immediately (Signal 8)

@@ -23,6 +23,7 @@ pub enum Response {
 pub struct StatusInfo {
     pub is_running: bool,
     pub is_active: bool,
+    pub is_paused: bool,
     pub language: String,
 }
 

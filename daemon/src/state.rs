@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 pub struct DaemonState {
     pub config: Config,
     pub is_active: Arc<Mutex<bool>>,
+    pub is_paused: Arc<Mutex<bool>>,
     pub audio_capture: Arc<Mutex<Option<AudioCapture>>>,
     pub audio_rx: Arc<Mutex<Option<broadcast::Receiver<Vec<f32>>>>>,
     pub whisper_engine: Arc<Mutex<Option<WhisperEngine>>>,
@@ -25,6 +26,7 @@ impl DaemonState {
         Self {
             config,
             is_active: Arc::new(Mutex::new(false)),
+            is_paused: Arc::new(Mutex::new(false)),
             audio_capture: Arc::new(Mutex::new(None)),
             audio_rx: Arc::new(Mutex::new(None)),
             whisper_engine: Arc::new(Mutex::new(None)),
@@ -33,23 +35,47 @@ impl DaemonState {
         }
     }
 
+    pub async fn initialize_startup(&mut self) -> anyhow::Result<()> {
+        tracing::info!("Initializing daemon startup state (active but paused)");
+
+        let mut whisper_engine = WhisperEngine::new(
+            self.config.whisper.model_url.clone(),
+            self.config.whisper.model.clone(),
+        )?;
+        whisper_engine.load_model().await?;
+        *self.whisper_engine.lock().await = Some(whisper_engine);
+
+        let virtual_keyboard = VirtualKeyboard::new()?;
+        *self.virtual_keyboard.lock().await = Some(virtual_keyboard);
+
+        *self.is_active.lock().await = true;
+        *self.is_paused.lock().await = true;
+
+        tracing::info!("Daemon initialized: active but paused (Whisper engine and keyboard ready)");
+        Ok(())
+    }
+
     pub async fn activate(&mut self) -> anyhow::Result<()> {
         *self.is_active.lock().await = true;
+        *self.is_paused.lock().await = false;
         tracing::info!("Daemon activated");
         Ok(())
     }
 
     pub async fn deactivate(&mut self) -> anyhow::Result<()> {
         *self.is_active.lock().await = false;
+        *self.is_paused.lock().await = false;
         tracing::info!("Daemon deactivated");
         Ok(())
     }
 
     pub async fn get_status(&self) -> StatusInfo {
         let is_active = *self.is_active.lock().await;
+        let is_paused = *self.is_paused.lock().await;
         StatusInfo {
             is_running: true,
             is_active,
+            is_paused,
             language: self.config.whisper.language.clone(),
         }
     }
@@ -194,5 +220,53 @@ impl DaemonState {
             handle.abort();
             tracing::info!("VAD processing task stopped");
         }
+    }
+
+    pub async fn pause(&mut self) -> anyhow::Result<()> {
+        // Stop VAD processing
+        self.stop_vad_processing().await;
+
+        // Stop audio capture
+        if let Some(capture) = self.audio_capture.lock().await.as_mut() {
+            capture.stop().await?;
+        }
+
+        // Deactivate but keep all components in memory
+        *self.is_active.lock().await = false;
+        *self.is_paused.lock().await = true;
+
+        tracing::info!("Daemon paused (components kept in memory)");
+        Ok(())
+    }
+
+    pub async fn resume(&mut self) -> anyhow::Result<()> {
+        // Check if components are initialized
+        if self.whisper_engine.lock().await.is_none()
+            || self.virtual_keyboard.lock().await.is_none()
+        {
+            return Err(anyhow::anyhow!(
+                "Cannot resume: components not initialized. Use 'start' command first."
+            ));
+        }
+
+        // Activate
+        *self.is_active.lock().await = true;
+        *self.is_paused.lock().await = false;
+
+        // Create new audio channel and start capture
+        let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
+
+        if let Some(capture) = self.audio_capture.lock().await.as_mut() {
+            capture.start(audio_tx)?;
+            tracing::info!("Audio capture resumed");
+        }
+
+        *self.audio_rx.lock().await = Some(audio_rx);
+
+        // Start VAD processing
+        self.start_vad_processing().await?;
+
+        tracing::info!("Daemon resumed");
+        Ok(())
     }
 }
