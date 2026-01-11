@@ -40,6 +40,7 @@ fn default_threshold_stop() -> f32 {
 pub struct WhisperConfig {
     pub model: String,
     pub model_path: Option<String>,
+    pub model_url: String,
     pub language: String,
 }
 
@@ -66,6 +67,9 @@ impl Default for Config {
             whisper: WhisperConfig {
                 model: "base".to_string(),
                 model_path: None,
+                model_url:
+                    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+                        .to_string(),
                 language: "auto".to_string(),
             },
             output: OutputConfig {

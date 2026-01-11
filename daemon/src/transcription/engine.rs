@@ -7,16 +7,20 @@ pub struct WhisperEngine {
     context: Option<WhisperContext>,
     model_loaded: bool,
     model_path: PathBuf,
+    model_url: String,
+    model_name: String,
 }
 
 impl WhisperEngine {
-    pub fn new() -> Result<Self> {
-        let model_path = Self::find_model_path()?;
+    pub fn new(model_url: String, model_name: String) -> Result<Self> {
+        let model_path = Self::find_model_path(&model_name)?;
 
         Ok(Self {
             context: None,
             model_loaded: false,
             model_path,
+            model_url,
+            model_name,
         })
     }
 
@@ -118,14 +122,19 @@ impl WhisperEngine {
         padded
     }
 
-    fn find_model_path() -> Result<PathBuf> {
+    fn find_model_path(model_name: &str) -> Result<PathBuf> {
+        let model_filename = format!("ggml-{}.bin", model_name);
+        let model_filename_en = format!("ggml-{}.en.bin", model_name);
+
         let possible_paths: Vec<Option<PathBuf>> = vec![
-            dirs::home_dir().map(|p| p.join(".local/share/ndict/ggml-base.en.bin")),
-            dirs::home_dir().map(|p| p.join(".local/share/ndict/ggml-base.bin")),
-            Some(PathBuf::from("/usr/share/whisper/ggml-base.en.bin")),
-            Some(PathBuf::from("/usr/share/whisper/ggml-base.bin")),
-            Some(PathBuf::from("./models/ggml-base.en.bin")),
-            Some(PathBuf::from("./ggml-base.en.bin")),
+            dirs::home_dir().map(|p| p.join(".local/share/ndict/").join(&model_filename)),
+            dirs::home_dir().map(|p| p.join(".local/share/ndict/").join(&model_filename_en)),
+            Some(PathBuf::from("/usr/share/whisper/").join(&model_filename)),
+            Some(PathBuf::from("/usr/share/whisper/").join(&model_filename_en)),
+            Some(PathBuf::from("./models/").join(&model_filename)),
+            Some(PathBuf::from("./models/").join(&model_filename_en)),
+            Some(PathBuf::from(&model_filename)),
+            Some(PathBuf::from(&model_filename_en)),
         ];
 
         for path in possible_paths {
@@ -140,15 +149,15 @@ impl WhisperEngine {
 
         let default_path = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-            .join(".local/share/ndict/ggml-base.en.bin");
+            .join(".local/share/ndict/")
+            .join(&model_filename);
 
         warn!("Model not found, will use default path: {:?}", default_path);
         Ok(default_path)
     }
 
     async fn download_model(&mut self) -> Result<()> {
-        let model_url =
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
+        let model_url = &self.model_url;
         let model_dir = self
             .model_path
             .parent()

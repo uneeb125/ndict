@@ -30,6 +30,9 @@ min_speech_duration_ms = 250
 model = "base"
 # Optional: custom path to Whisper model file
 # model_path = "/path/to/model.ggml"
+# URL to download Whisper model from if not found locally
+# HuggingFace URLs recommended
+model_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
 # Language code (e.g., "en", "es", "auto" for auto-detection)
 language = "auto"
 

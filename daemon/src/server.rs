@@ -86,7 +86,10 @@ impl DaemonServer {
                 *state_guard.audio_capture.lock().await = Some(new_capture);
                 *state_guard.audio_rx.lock().await = Some(audio_rx);
 
-                let mut whisper_engine = WhisperEngine::new()?;
+                let mut whisper_engine = WhisperEngine::new(
+                    state_guard.config.whisper.model_url.clone(),
+                    state_guard.config.whisper.model.clone(),
+                )?;
                 whisper_engine.load_model().await?;
                 *state_guard.whisper_engine.lock().await = Some(whisper_engine);
 
@@ -166,7 +169,10 @@ impl DaemonServer {
                     *state_guard.audio_capture.lock().await = Some(new_capture);
                     *state_guard.audio_rx.lock().await = Some(audio_rx);
 
-                    let mut whisper_engine = WhisperEngine::new()?;
+                    let mut whisper_engine = WhisperEngine::new(
+                        state_guard.config.whisper.model_url.clone(),
+                        state_guard.config.whisper.model.clone(),
+                    )?;
                     whisper_engine.load_model().await?;
                     *state_guard.whisper_engine.lock().await = Some(whisper_engine);
 

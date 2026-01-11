@@ -158,6 +158,7 @@ EOF
 # ==========================================
 # RELOAD AND START
 # ==========================================
+sleep 1
 systemctl --user daemon-reload
 systemctl --user enable "$SERVICE_NAME"
 systemctl --user start "$SERVICE_NAME"
