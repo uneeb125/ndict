@@ -22,5 +22,7 @@ pub fn post_process_transcription(text: &str) -> String {
 
     tracing::debug!("Post-processed: '{}' -> '{}'", text.trim(), text);
 
+    text = text.replace(".", ". ");
+    text = text.replace("?", "? ");
     text
 }
