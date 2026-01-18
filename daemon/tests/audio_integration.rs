@@ -18,8 +18,8 @@ mod tests {
     use crate::common::print_info;
     use crate::common::print_success;
     use ndictd::audio::capture::AudioCapture;
-    use tokio::sync::broadcast;
     use std::time::Duration;
+    use tokio::sync::broadcast;
 
     #[tokio::test]
     #[ignore = "Requires microphone and user interaction"]
@@ -39,21 +39,21 @@ mod tests {
         print_info("Please remain silent.");
 
         let (tx, mut rx) = broadcast::channel(100);
-        let mut capture = AudioCapture::new()
-            .expect("Failed to create audio capture. Check permissions.");
-        
+        let mut capture =
+            AudioCapture::new().expect("Failed to create audio capture. Check permissions.");
+
         capture.start(tx).expect("Failed to start audio capture");
 
         let mut max_level_detected = 0.0;
         let mut audio_detected = false;
         let mut last_output = std::time::Instant::now();
-        
+
         // Run capture loop for 3 seconds
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
             loop {
                 if let Ok(audio_data) = rx.recv().await {
                     let level = calculate_rms_level(&audio_data);
-                    
+
                     if level > max_level_detected {
                         max_level_detected = level;
                     }
@@ -70,16 +70,23 @@ mod tests {
                     }
                 }
             }
-        }).await; // Timeout error is expected here, we just ignore it to stop the loop
+        })
+        .await; // Timeout error is expected here, we just ignore it to stop the loop
 
         capture.stop().await.expect("Failed to stop capture");
 
         if audio_detected {
-            print_error(&format!("FAILURE: Detected audio level {:.4} during silence", max_level_detected));
+            print_error(&format!(
+                "FAILURE: Detected audio level {:.4} during silence",
+                max_level_detected
+            ));
             print_info("Possible causes: Background noise, high gain, or faulty hardware.");
             panic!("Test failed: Silence verification failed.");
         } else {
-            print_success(&format!("Success. Max level detected: {:.4}", max_level_detected));
+            print_success(&format!(
+                "Success. Max level detected: {:.4}",
+                max_level_detected
+            ));
         }
     }
 
@@ -100,9 +107,8 @@ mod tests {
         print_info("Please speak clearly now.");
 
         let (tx, mut rx) = broadcast::channel(100);
-        let mut capture = AudioCapture::new()
-            .expect("Failed to create audio capture");
-        
+        let mut capture = AudioCapture::new().expect("Failed to create audio capture");
+
         capture.start(tx).expect("Failed to start capture");
 
         let mut speech_detected = false;
@@ -123,7 +129,8 @@ mod tests {
                     }
                 }
             }
-        }).await;
+        })
+        .await;
 
         capture.stop().await.expect("Failed to stop capture");
 
@@ -150,9 +157,8 @@ mod tests {
         print_info("Capturing for 5 seconds...");
 
         let (tx, mut rx) = broadcast::channel(100);
-        let mut capture = AudioCapture::new()
-            .expect("Failed to create capture");
-        
+        let mut capture = AudioCapture::new().expect("Failed to create capture");
+
         capture.start(tx).expect("Failed to start capture");
 
         let mut chunk_count = 0;
@@ -172,7 +178,8 @@ mod tests {
                     }
                 }
             }
-        }).await;
+        })
+        .await;
 
         capture.stop().await.expect("Failed to stop capture");
 
@@ -180,7 +187,10 @@ mod tests {
             print_error("FAILURE: No audio chunks received.");
             panic!("Test failed: Stream was empty.");
         } else {
-            print_success(&format!("Success. Received {} chunks in 5 seconds.", chunk_count));
+            print_success(&format!(
+                "Success. Received {} chunks in 5 seconds.",
+                chunk_count
+            ));
         }
     }
 }
