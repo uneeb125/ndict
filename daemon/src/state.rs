@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 pub struct DaemonState {
     pub config: Config,
     pub is_active: Arc<Mutex<bool>>,
+    pub is_processing: Arc<Mutex<bool>>,
     pub audio_capture: Arc<Mutex<Option<AudioCapture>>>,
     pub audio_rx: Arc<Mutex<Option<broadcast::Receiver<Vec<f32>>>>>,
     pub whisper_engine: Arc<Mutex<Option<WhisperEngine>>>,
@@ -25,6 +26,7 @@ impl DaemonState {
         Self {
             config,
             is_active: Arc::new(Mutex::new(false)),
+            is_processing: Arc::new(Mutex::new(false)),
             audio_capture: Arc::new(Mutex::new(None)),
             audio_rx: Arc::new(Mutex::new(None)),
             whisper_engine: Arc::new(Mutex::new(None)),
@@ -55,6 +57,11 @@ impl DaemonState {
     }
 
     pub async fn start_vad_processing(&self) -> anyhow::Result<()> {
+        let is_processing = *self.is_processing.lock().await;
+        if is_processing {
+            return Err(anyhow::anyhow!("Already processing audio"));
+        }
+
         let audio_rx_option: Option<broadcast::Receiver<Vec<f32>>> =
             self.audio_rx.lock().await.take();
         let whisper_engine = self.whisper_engine.clone();
@@ -69,7 +76,11 @@ impl DaemonState {
         }
 
         let mut audio_rx = audio_rx_option.unwrap();
+        let is_processing_flag = self.is_processing.clone();
+
         let vad_task = tokio::spawn(async move {
+            *is_processing_flag.lock().await = true;
+
             tracing::info!("VAD processing task started");
 
             let mut speech_detector = SpeechDetector::new(
@@ -183,6 +194,8 @@ impl DaemonState {
                     }
                 }
             }
+
+            *is_processing_flag.lock().await = false;
         });
 
         *self.vad_task_handle.lock().await = Some(vad_task);
@@ -190,6 +203,7 @@ impl DaemonState {
     }
 
     pub async fn stop_vad_processing(&self) {
+        *self.is_processing.lock().await = false;
         if let Some(handle) = self.vad_task_handle.lock().await.take() {
             handle.abort();
             tracing::info!("VAD processing task stopped");
@@ -208,6 +222,7 @@ mod tests {
 
         assert_eq!(state.config, config);
         assert!(!*state.is_active.lock().await);
+        assert!(!*state.is_processing.lock().await);
         assert!(state.audio_capture.lock().await.is_none());
         assert!(state.audio_rx.lock().await.is_none());
         assert!(state.whisper_engine.lock().await.is_none());

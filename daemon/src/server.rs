@@ -65,25 +65,30 @@ impl DaemonServer {
                 let mut state_guard = state.lock().await;
                 state_guard.activate().await?;
 
-                if state_guard.audio_capture.lock().await.is_some() {
-                    return Err(anyhow::anyhow!("Audio capture already running"));
+                if *state_guard.is_processing.lock().await {
+                    return Err(anyhow::anyhow!("Already processing audio"));
                 }
 
-                let mut new_capture = AudioCapture::new()?;
+                if state_guard.whisper_engine.lock().await.is_none() {
+                    let mut whisper_engine = WhisperEngine::new(
+                        state_guard.config.whisper.model_url.clone(),
+                        state_guard.config.whisper.backend.clone(),
+                    )?;
+                    whisper_engine.load_model().await?;
+                    *state_guard.whisper_engine.lock().await = Some(whisper_engine);
+                    info!("Whisper engine loaded into memory");
+                }
+
+                if state_guard.virtual_keyboard.lock().await.is_none() {
+                    let virtual_keyboard = VirtualKeyboard::new()?;
+                    *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+                }
+
                 let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
+                let mut new_capture = AudioCapture::new()?;
                 new_capture.start(audio_tx)?;
                 *state_guard.audio_capture.lock().await = Some(new_capture);
                 *state_guard.audio_rx.lock().await = Some(audio_rx);
-
-                let mut whisper_engine = WhisperEngine::new(
-                    state_guard.config.whisper.model_url.clone(),
-                    state_guard.config.whisper.backend.clone(),
-                )?;
-                whisper_engine.load_model().await?;
-                *state_guard.whisper_engine.lock().await = Some(whisper_engine);
-
-                let virtual_keyboard = VirtualKeyboard::new()?;
-                *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
 
                 debug!("Audio capture started, VAD, Whisper, and Keyboard ready");
 
@@ -104,10 +109,8 @@ impl DaemonServer {
                 }
                 *state_guard.audio_capture.lock().await = None;
                 *state_guard.audio_rx.lock().await = None;
-                *state_guard.whisper_engine.lock().await = None;
-                *state_guard.virtual_keyboard.lock().await = None;
                 state_guard.deactivate().await?;
-                info!("Deactivated audio capture");
+                info!("Stopped audio processing, model kept in memory");
                 Response::Ok
             }
             Command::Pause => {
@@ -138,35 +141,38 @@ impl DaemonServer {
                     }
                     *state_guard.audio_capture.lock().await = None;
                     *state_guard.audio_rx.lock().await = None;
-                    *state_guard.whisper_engine.lock().await = None;
-                    *state_guard.virtual_keyboard.lock().await = None;
                     state_guard.deactivate().await?;
-                    info!("Deactivated audio capture");
+                    info!("Stopped audio processing, model kept in memory");
                     Response::Ok
                 } else {
                     info!("Toggling: inactive -> starting");
                     let mut state_guard = state.lock().await;
                     state_guard.activate().await?;
 
-                    if state_guard.audio_capture.lock().await.is_some() {
-                        return Err(anyhow::anyhow!("Audio capture already running"));
+                    if *state_guard.is_processing.lock().await {
+                        return Err(anyhow::anyhow!("Already processing audio"));
                     }
 
-                    let mut new_capture = AudioCapture::new()?;
+                    if state_guard.whisper_engine.lock().await.is_none() {
+                        let mut whisper_engine = WhisperEngine::new(
+                            state_guard.config.whisper.model_url.clone(),
+                            state_guard.config.whisper.backend.clone(),
+                        )?;
+                        whisper_engine.load_model().await?;
+                        *state_guard.whisper_engine.lock().await = Some(whisper_engine);
+                        info!("Whisper engine loaded into memory");
+                    }
+
+                    if state_guard.virtual_keyboard.lock().await.is_none() {
+                        let virtual_keyboard = VirtualKeyboard::new()?;
+                        *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+                    }
+
                     let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(100);
+                    let mut new_capture = AudioCapture::new()?;
                     new_capture.start(audio_tx)?;
                     *state_guard.audio_capture.lock().await = Some(new_capture);
                     *state_guard.audio_rx.lock().await = Some(audio_rx);
-
-                    let mut whisper_engine = WhisperEngine::new(
-                        state_guard.config.whisper.model_url.clone(),
-                        state_guard.config.whisper.backend.clone(),
-                    )?;
-                    whisper_engine.load_model().await?;
-                    *state_guard.whisper_engine.lock().await = Some(whisper_engine);
-
-                    let virtual_keyboard = VirtualKeyboard::new()?;
-                    *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
 
                     debug!("Audio capture started, VAD, Whisper, and Keyboard ready");
 
