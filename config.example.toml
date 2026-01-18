@@ -33,6 +33,9 @@ model_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base
 # Language code (e.g., "en", "es", "auto" for auto-detection)
 language = "auto"
 # Backend to use: cpu (default), gpu, cuda
+# GPU backend on AMD/ROCm may have initialization issues.
+# If GPU fails, daemon will automatically fall back to CPU.
+# Uses whisper-rs from Codeberg (https://codeberg.org/tazz4843/whisper-rs)
 backend = "cpu"
 
 [output]

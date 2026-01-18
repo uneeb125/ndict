@@ -54,15 +54,34 @@ impl WhisperEngine {
 
         let mut params = WhisperContextParameters::default();
         if use_gpu {
-            info!("Using GPU backend for Whisper");
+            info!("Attempting to use GPU backend for Whisper");
             params.use_gpu(true);
         } else {
             info!("Using CPU backend for Whisper");
             params.use_gpu(false);
         }
 
-        let ctx = WhisperContext::new_with_params(self.model_path.to_str().unwrap(), params)
-            .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {}", e))?;
+        let ctx = if use_gpu {
+            match WhisperContext::new_with_params(self.model_path.to_str().unwrap(), params) {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    warn!(
+                        "GPU initialization failed: {}. Falling back to CPU backend. \
+                        Note: whisper-rs GPU support on ROCm/AMD may not be fully stable. \
+                        See: https://github.com/tazz4843/whisper-rs/issues/135",
+                        e
+                    );
+                    let mut cpu_params = WhisperContextParameters::default();
+                    cpu_params.use_gpu(false);
+                    WhisperContext::new_with_params(self.model_path.to_str().unwrap(), cpu_params)
+                        .map_err(|e| {
+                        anyhow::anyhow!("Failed to load Whisper model (CPU fallback): {}", e)
+                    })?
+                }
+            }
+        } else {
+            WhisperContext::new_with_params(self.model_path.to_str().unwrap(), params)?
+        };
 
         let state = ctx
             .create_state()
@@ -73,10 +92,17 @@ impl WhisperEngine {
         self.model_loaded = true;
 
         let backend_name = if use_gpu { "GPU" } else { "CPU" };
-        info!(
-            "Whisper model and state loaded successfully ({} backend, stable memory usage)",
-            backend_name
-        );
+        if use_gpu {
+            info!(
+                "Whisper model and state loaded successfully ({} backend attempted, CPU fallback used)",
+                backend_name
+            );
+        } else {
+            info!(
+                "Whisper model and state loaded successfully ({} backend, stable memory usage)",
+                backend_name
+            );
+        }
         Ok(())
     }
 
