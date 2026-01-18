@@ -49,6 +49,7 @@ mod tests {
                 print_info("  - No active Wayland session");
                 print_info("  - No focused text input window");
                 print_info("  - Missing CAP_SYS_INPUT capability");
+                panic!("Test failed: {}", e);
             }
         }
     }
@@ -82,6 +83,7 @@ mod tests {
             }
             Err(e) => {
                 print_error(&format!("Failed to type special characters: {}", e));
+                panic!("Test failed: {}", e);
             }
         }
     }
@@ -119,6 +121,7 @@ mod tests {
             }
             Err(e) => {
                 print_error(&format!("Failed to type Unicode characters: {}", e));
+                panic!("Test failed: {}", e);
             }
         }
     }
@@ -166,6 +169,7 @@ mod tests {
             }
             Err(e) => {
                 print_error(&format!("Failed to type message: {}", e));
+                panic!("Test failed: {}", e);
             }
         }
     }
@@ -195,6 +199,7 @@ mod tests {
             }
             Err(e) => {
                 print_error(&format!("Failed with empty text: {}", e));
+                panic!("Test failed: {}", e);
             }
         }
     }
@@ -220,19 +225,55 @@ mod tests {
 
         wait_for_user("Press Enter to start typing...");
 
-        let result = keyboard.type_text(&test_text);
+        let timeout = std::time::Duration::from_secs(5);
+        let start = std::time::Instant::now();
+
+        let typing_thread = std::thread::spawn(move || {
+            let mut keyboard = VirtualKeyboard::new().expect("Failed to create keyboard");
+            keyboard.type_text(&test_text)
+        });
+
+        let result = typing_thread
+            .join()
+            .unwrap_or(Err(anyhow::anyhow!("Thread panicked")));
+
+        let elapsed = start.elapsed();
+        if elapsed > timeout {
+            print_error(&format!("Timeout exceeded: {:.2}s", elapsed.as_secs_f64()));
+            panic!("Test failed: Typing exceeded 5 second timeout");
+        }
 
         match result {
             Ok(_) => {
-                print_success("Very long text test completed");
+                print_success(&format!(
+                    "Very long text test completed in {:.2}s",
+                    elapsed.as_secs_f64()
+                ));
                 print_info("Check if text appeared in your window.");
-                print_info("Note: Timeout may occur if text is too long for timeout (5s)");
             }
             Err(e) => {
                 print_error(&format!("Failed to type very long text: {}", e));
                 print_info("This may indicate:");
                 print_info("  - Timeout exceeded (text too long for 5s)");
                 print_info("  - Application limitations");
+                panic!("Test failed: {}", e);
+            }
+        }
+
+        match result {
+            Ok(_) => {
+                print_success(&format!(
+                    "Very long text test completed in {:.2}s",
+                    elapsed.as_secs_f64()
+                ));
+                print_info("Check if text appeared in your window.");
+            }
+            Err(e) => {
+                print_error(&format!("Failed to type very long text: {}", e));
+                print_info("This may indicate:");
+                print_info("  - Timeout exceeded (text too long for 5s)");
+                print_info("  - Application limitations");
+                panic!("Test failed: {}", e);
             }
         }
     }
