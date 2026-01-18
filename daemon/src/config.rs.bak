@@ -2,57 +2,30 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
-    #[serde(default)]
     pub audio: AudioConfig,
-    #[serde(default)]
     pub vad: VadConfig,
-    #[serde(default)]
     pub whisper: WhisperConfig,
-    #[serde(default)]
     pub output: OutputConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AudioConfig {
-    #[serde(default)]
     pub device: String,
-    #[serde(default = "default_sample_rate")]
     pub sample_rate: u32,
-    #[serde(default = "default_chunk_size")]
     pub chunk_size: u32,
-    #[serde(default = "default_gain")]
     pub gain: f32,
 }
 
-fn default_sample_rate() -> u32 {
-    16000
-}
-fn default_chunk_size() -> u32 {
-    512
-}
-fn default_gain() -> f32 {
-    1.0
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VadConfig {
     #[serde(default = "default_threshold_start")]
     pub threshold_start: f32,
     #[serde(default = "default_threshold_stop")]
     pub threshold_stop: f32,
-    #[serde(default = "default_min_speech_duration")]
     pub min_speech_duration_ms: u32,
-    #[serde(default = "default_min_silence_duration")]
     pub min_silence_duration_ms: u32,
-}
-
-fn default_min_speech_duration() -> u32 {
-    250
-}
-fn default_min_silence_duration() -> u32 {
-    1000
 }
 
 fn default_threshold_start() -> f32 {
@@ -63,42 +36,23 @@ fn default_threshold_stop() -> f32 {
     0.01
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WhisperConfig {
-    #[serde(default = "default_model")]
     pub model: String,
-    #[serde(default)]
     pub model_path: Option<String>,
-    #[serde(default = "default_model_url")]
     pub model_url: String,
-    #[serde(default = "default_language")]
     pub language: String,
     #[serde(default = "default_gpu_backend")]
     pub gpu_backend: String,
-}
-
-fn default_model() -> String {
-    "base".to_string()
-}
-fn default_model_url() -> String {
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin".to_string()
-}
-fn default_language() -> String {
-    "auto".to_string()
 }
 
 fn default_gpu_backend() -> String {
     "cpu".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OutputConfig {
-    #[serde(default = "default_typing_mode")]
     pub typing_mode: String,
-}
-
-fn default_typing_mode() -> String {
-    "instant".to_string()
 }
 
 impl Default for Config {
@@ -151,11 +105,12 @@ pub fn load_config() -> Result<Config> {
     Ok(config)
 }
 
-fn get_config_path() -> PathBuf {
-    dirs::config_dir()
-        .expect("Failed to get config directory")
-        .join("ndict")
-        .join("config.toml")
+    fn get_config_path() -> PathBuf {
+        dirs::config_dir()
+            .expect("Failed to get config directory")
+            .join("ndict")
+            .join("config.toml")
+    }
 }
 
 #[cfg(test)]
@@ -177,10 +132,8 @@ mod tests {
         assert_eq!(config.vad.min_silence_duration_ms, 1000);
 
         assert_eq!(config.whisper.model, "base");
-        assert_eq!(
-            config.whisper.model_url,
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
-        );
+        assert_eq!(config.whisper.model_url,
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin");
         assert_eq!(config.whisper.language, "auto");
         assert_eq!(config.whisper.gpu_backend, "cpu");
 
@@ -329,9 +282,6 @@ mod tests {
             model_path = "/custom/path/model.bin"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(
-            config.whisper.model_path,
-            Some("/custom/path/model.bin".to_string())
-        );
+        assert_eq!(config.whisper.model_path, Some("/custom/path/model.bin".to_string()));
     }
 }

@@ -54,21 +54,10 @@ impl DaemonServer {
         }
     }
 
-    async fn handle_connection(
+    pub async fn execute_command(
         state: Arc<Mutex<DaemonState>>,
-        mut stream: tokio::net::UnixStream,
-    ) -> anyhow::Result<()> {
-        let mut buffer = vec![0u8; 1024];
-        let n = stream.read(&mut buffer).await?;
-
-        if n == 0 {
-            return Ok(());
-        }
-
-        buffer.truncate(n);
-
-        let command: Command = serde_json::from_slice(&buffer)?;
-
+        command: Command,
+    ) -> anyhow::Result<Response> {
         info!("Received command: {:?}", command);
 
         let response = match command {
@@ -193,6 +182,26 @@ impl DaemonServer {
             }
         };
 
+        Ok(response)
+    }
+
+    async fn handle_connection(
+        state: Arc<Mutex<DaemonState>>,
+        mut stream: tokio::net::UnixStream,
+    ) -> anyhow::Result<()> {
+        let mut buffer = vec![0u8; 1024];
+        let n = stream.read(&mut buffer).await?;
+
+        if n == 0 {
+            return Ok(());
+        }
+
+        buffer.truncate(n);
+
+        let command: Command = serde_json::from_slice(&buffer)?;
+
+        let response = Self::execute_command(state.clone(), command).await?;
+
         let response_json = serde_json::to_vec(&response)?;
         stream.write(&response_json).await?;
 
@@ -207,5 +216,128 @@ impl Drop for DaemonServer {
         if self.socket_path.exists() {
             let _ = std::fs::remove_file(&self.socket_path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[tokio::test]
+    async fn test_daemon_server_new() {
+        let socket_path = PathBuf::from("/tmp/test.sock");
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config)));
+        let server = DaemonServer::new(socket_path.clone(), state);
+
+        assert_eq!(server.socket_path, socket_path);
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_pause() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config)));
+
+        let result = DaemonServer::execute_command(state.clone(), Command::Pause).await;
+        assert!(matches!(result, Ok(Response::Ok)));
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_resume() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config)));
+
+        let result = DaemonServer::execute_command(state.clone(), Command::Resume).await;
+        assert!(matches!(result, Ok(Response::Ok)));
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_status() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config.clone())));
+
+        let result = DaemonServer::execute_command(state.clone(), Command::Status).await;
+
+        if let Ok(Response::Status(info)) = result {
+            assert_eq!(info.is_running, true);
+            assert_eq!(info.is_active, false);
+            assert_eq!(info.language, config.whisper.language);
+        } else {
+            panic!("Expected Status response");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_status_active() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config.clone())));
+
+        {
+            let mut state_guard = state.lock().await;
+            state_guard.activate().await.unwrap();
+        }
+
+        let result = DaemonServer::execute_command(state.clone(), Command::Status).await;
+
+        if let Ok(Response::Status(info)) = result {
+            assert_eq!(info.is_running, true);
+            assert_eq!(info.is_active, true);
+            assert_eq!(info.language, config.whisper.language);
+        } else {
+            panic!("Expected Status response");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_set_language() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config)));
+
+        let result =
+            DaemonServer::execute_command(state.clone(), Command::SetLanguage("es".to_string()))
+                .await;
+        assert!(matches!(result, Ok(Response::Ok)));
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_set_language_multiple() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config)));
+
+        let languages = vec!["en", "es", "fr", "de"];
+        for lang in languages {
+            let result = DaemonServer::execute_command(
+                state.clone(),
+                Command::SetLanguage(lang.to_string()),
+            )
+            .await;
+            assert!(matches!(result, Ok(Response::Ok)));
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "Toggle command requires real audio/hardware, cannot test reliably without mocking"]
+    async fn test_execute_command_toggle_inactive() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config)));
+
+        let result = DaemonServer::execute_command(state.clone(), Command::Toggle).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "Toggle command requires real audio/hardware, cannot test reliably without mocking"]
+    async fn test_execute_command_toggle_active() {
+        let config = Config::default();
+        let state = Arc::new(Mutex::new(DaemonState::new(config)));
+
+        let mut state_guard = state.lock().await;
+        state_guard.activate().await.unwrap();
+
+        let result = DaemonServer::execute_command(state.clone(), Command::Toggle).await;
+
+        assert!(result.is_err());
     }
 }

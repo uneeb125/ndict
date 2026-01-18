@@ -136,7 +136,7 @@ impl WhisperEngine {
         padded
     }
 
-    fn find_model_path(model_name: &str) -> Result<PathBuf> {
+    pub fn find_model_path(model_name: &str) -> Result<PathBuf> {
         let model_filename = format!("ggml-{}.bin", model_name);
         let model_filename_en = format!("ggml-{}.en.bin", model_name);
 
@@ -209,5 +209,116 @@ impl WhisperEngine {
 
         info!("Model downloaded successfully to: {:?}", self.model_path);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_model_path_existing() {
+        let path = WhisperEngine::find_model_path("base").unwrap();
+
+        assert!(path.to_str().unwrap().contains("ggml-base"));
+        assert!(path.extension().unwrap() == "bin");
+    }
+
+    #[test]
+    fn test_find_model_path_en_variant() {
+        let path = WhisperEngine::find_model_path("base").unwrap();
+
+        assert!(path.to_str().unwrap().contains("ggml-base"));
+    }
+
+    #[test]
+    fn test_find_model_path_fallback() {
+        let path = WhisperEngine::find_model_path("nonexistent").unwrap();
+
+        assert!(path.to_str().unwrap().contains("ggml-nonexistent.bin"));
+        assert!(path.to_str().unwrap().contains(".local/share/ndict"));
+    }
+
+    #[test]
+    fn test_pad_audio_no_padding_needed() {
+        let engine = WhisperEngine::new(
+            "https://example.com/model.bin".to_string(),
+            "base".to_string(),
+        )
+        .unwrap();
+
+        let audio = vec![0.0f32; 20000];
+        let padded = engine.pad_audio(&audio, 16000);
+
+        assert_eq!(padded.len(), 20000);
+    }
+
+    #[test]
+    fn test_pad_audio_with_padding() {
+        let engine = WhisperEngine::new(
+            "https://example.com/model.bin".to_string(),
+            "base".to_string(),
+        )
+        .unwrap();
+
+        let audio = vec![0.0f32; 10000];
+        let padded = engine.pad_audio(&audio, 16000);
+
+        assert_eq!(padded.len(), 16000);
+        assert_eq!(padded[..10000], audio);
+        assert_eq!(padded[10000..], vec![0.0f32; 6000]);
+    }
+
+    #[test]
+    fn test_pad_audio_exact_length() {
+        let engine = WhisperEngine::new(
+            "https://example.com/model.bin".to_string(),
+            "base".to_string(),
+        )
+        .unwrap();
+
+        let audio = vec![0.0f32; 16000];
+        let padded = engine.pad_audio(&audio, 16000);
+
+        assert_eq!(padded.len(), 16000);
+        assert_eq!(padded, audio);
+    }
+
+    #[test]
+    fn test_pad_audio_empty() {
+        let engine = WhisperEngine::new(
+            "https://example.com/model.bin".to_string(),
+            "base".to_string(),
+        )
+        .unwrap();
+
+        let audio = vec![];
+        let padded = engine.pad_audio(&audio, 16000);
+
+        assert_eq!(padded.len(), 16000);
+        assert!(padded.iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn test_new_whisper_engine() {
+        let engine = WhisperEngine::new(
+            "https://huggingface.co/model.bin".to_string(),
+            "tiny".to_string(),
+        )
+        .unwrap();
+
+        assert!(engine.model_url.contains("huggingface.co"));
+        assert!(engine.model_name == "tiny");
+        assert_eq!(engine.model_loaded, false);
+        assert!(engine.context.is_none());
+        assert!(engine.state.is_none());
+    }
+
+    #[test]
+    fn test_new_whisper_engine_custom_url() {
+        let custom_url = "http://custom.com/model.bin".to_string();
+        let engine = WhisperEngine::new(custom_url.clone(), "base".to_string()).unwrap();
+
+        assert_eq!(engine.model_url, custom_url);
     }
 }

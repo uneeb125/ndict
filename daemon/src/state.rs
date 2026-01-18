@@ -196,3 +196,104 @@ impl DaemonState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_daemon_state_new() {
+        let config = Config::default();
+        let state = DaemonState::new(config.clone());
+
+        assert_eq!(state.config, config);
+        assert!(!*state.is_active.lock().await);
+        assert!(state.audio_capture.lock().await.is_none());
+        assert!(state.audio_rx.lock().await.is_none());
+        assert!(state.whisper_engine.lock().await.is_none());
+        assert!(state.virtual_keyboard.lock().await.is_none());
+        assert!(state.vad_task_handle.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_activate() {
+        let config = Config::default();
+        let mut state = DaemonState::new(config);
+
+        assert!(!*state.is_active.lock().await);
+
+        state.activate().await.unwrap();
+
+        assert!(*state.is_active.lock().await);
+    }
+
+    #[tokio::test]
+    async fn test_deactivate() {
+        let config = Config::default();
+        let mut state = DaemonState::new(config);
+
+        state.activate().await.unwrap();
+        assert!(*state.is_active.lock().await);
+
+        state.deactivate().await.unwrap();
+
+        assert!(!*state.is_active.lock().await);
+    }
+
+    #[tokio::test]
+    async fn test_get_status() {
+        let config = Config::default();
+        let state = DaemonState::new(config.clone());
+
+        let status = state.get_status().await;
+
+        assert_eq!(status.is_running, true);
+        assert_eq!(status.is_active, false);
+        assert_eq!(status.language, config.whisper.language);
+    }
+
+    #[tokio::test]
+    async fn test_get_status_active() {
+        let config = Config::default();
+        let mut state = DaemonState::new(config.clone());
+
+        state.activate().await.unwrap();
+
+        let status = state.get_status().await;
+
+        assert_eq!(status.is_running, true);
+        assert_eq!(status.is_active, true);
+        assert_eq!(status.language, config.whisper.language);
+    }
+
+    #[tokio::test]
+    async fn test_stop_vad_processing() {
+        let config = Config::default();
+        let state = DaemonState::new(config);
+
+        let handle = tokio::spawn(async {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        });
+        *state.vad_task_handle.lock().await = Some(handle);
+
+        assert!(state.vad_task_handle.lock().await.is_some());
+
+        state.stop_vad_processing().await;
+
+        assert!(state.vad_task_handle.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stop_vad_processing_no_task() {
+        let config = Config::default();
+        let state = DaemonState::new(config);
+
+        assert!(state.vad_task_handle.lock().await.is_none());
+
+        state.stop_vad_processing().await;
+
+        assert!(state.vad_task_handle.lock().await.is_none());
+    }
+}

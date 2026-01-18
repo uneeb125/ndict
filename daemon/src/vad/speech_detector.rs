@@ -134,3 +134,116 @@ impl SpeechDetector {
         self.silence_start_time = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_speech_detector_new() {
+        let detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+        assert_eq!(detector.state, SpeechState::Idle);
+        assert!(detector.speech_start_time.is_none());
+        assert!(detector.silence_start_time.is_none());
+        assert!(detector.speech_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_idle_state_no_speech_below_threshold() {
+        let mut detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+
+        let samples = vec![0.01, 0.01, 0.01];
+        let result = detector.process_audio(&samples);
+
+        assert!(result.is_none());
+        assert_eq!(detector.state, SpeechState::Idle);
+        assert!(detector.speech_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_idle_state_transition_to_speaking() {
+        let mut detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+
+        let samples = vec![0.03, 0.03, 0.03];
+        let result = detector.process_audio(&samples);
+
+        assert!(result.is_none());
+        assert_eq!(detector.state, SpeechState::Speaking);
+        assert!(!detector.speech_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_speaking_state_accumulates_buffer() {
+        let mut detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+
+        let samples1 = vec![0.03, 0.03];
+        detector.process_audio(&samples1);
+
+        let samples2 = vec![0.04, 0.04];
+        detector.process_audio(&samples2);
+
+        assert_eq!(detector.state, SpeechState::Speaking);
+        assert_eq!(detector.speech_buffer.len(), 4);
+    }
+
+    #[test]
+    fn test_speaking_to_silence_detected_transition() {
+        let mut detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+
+        let samples_speech = vec![0.03, 0.03];
+        detector.process_audio(&samples_speech);
+
+        let samples_silence = vec![0.005, 0.005];
+        let result = detector.process_audio(&samples_silence);
+
+        assert!(result.is_none());
+        assert_eq!(detector.state, SpeechState::SilenceDetected);
+        assert!(detector.silence_start_time.is_some());
+    }
+
+    #[test]
+    fn test_silence_detected_to_speaking_false_alarm() {
+        let mut detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+
+        detector.process_audio(&vec![0.03, 0.03]);
+        detector.process_audio(&vec![0.005, 0.005]);
+        let result = detector.process_audio(&vec![0.03, 0.03]);
+
+        assert!(result.is_none());
+        assert_eq!(detector.state, SpeechState::Speaking);
+        assert!(detector.silence_start_time.is_none());
+    }
+
+    #[test]
+    fn test_hysteresis_prevents_oscillation() {
+        let mut detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+
+        detector.process_audio(&vec![0.03, 0.03]);
+        assert_eq!(detector.state, SpeechState::Speaking);
+
+        detector.process_audio(&vec![0.015, 0.015]);
+        assert_eq!(detector.state, SpeechState::Speaking);
+
+        detector.process_audio(&vec![0.005, 0.005]);
+        assert_eq!(detector.state, SpeechState::SilenceDetected);
+    }
+
+    #[test]
+    fn test_empty_samples_does_not_crash() {
+        let mut detector = SpeechDetector::new(0.02, 0.01, 1000, 1.0).unwrap();
+
+        let result = detector.process_audio(&[]);
+        assert!(result.is_none());
+        assert_eq!(detector.state, SpeechState::Idle);
+    }
+
+    #[test]
+    fn test_duration_calculation() {
+        let detector = SpeechDetector::new(0.02, 0.01, 100, 1.0).unwrap();
+
+        let samples = vec![0.0f32; 1600];
+        let calculated = detector.calculate_duration_ms(&samples);
+
+        assert_eq!(calculated, 100);
+    }
+}
