@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::output::VirtualKeyboard;
 use crate::transcription;
 use crate::transcription::engine::WhisperEngine;
+use crate::transcription::streaming_engine::StreamingEngine;
 use crate::vad::speech_detector::SpeechDetector;
 use shared::ipc::StatusInfo;
 use std::sync::Arc;
@@ -17,8 +18,10 @@ pub struct DaemonState {
     pub audio_capture: Arc<Mutex<Option<AudioCapture>>>,
     pub audio_rx: Arc<Mutex<Option<broadcast::Receiver<Vec<f32>>>>>,
     pub whisper_engine: Arc<Mutex<Option<WhisperEngine>>>,
+    pub streaming_engine: Arc<Mutex<Option<StreamingEngine>>>,
     pub virtual_keyboard: Arc<Mutex<Option<VirtualKeyboard>>>,
     pub vad_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    pub streaming_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl DaemonState {
@@ -30,8 +33,10 @@ impl DaemonState {
             audio_capture: Arc::new(Mutex::new(None)),
             audio_rx: Arc::new(Mutex::new(None)),
             whisper_engine: Arc::new(Mutex::new(None)),
+            streaming_engine: Arc::new(Mutex::new(None)),
             virtual_keyboard: Arc::new(Mutex::new(None)),
             vad_task_handle: Arc::new(Mutex::new(None)),
+            streaming_task_handle: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -202,11 +207,93 @@ impl DaemonState {
         Ok(())
     }
 
+    pub async fn start_streaming_processing(&self) -> anyhow::Result<()> {
+        let is_processing = *self.is_processing.lock().await;
+        if is_processing {
+            return Err(anyhow::anyhow!("Already processing audio"));
+        }
+
+        let audio_rx_option: Option<broadcast::Receiver<Vec<f32>>> =
+            self.audio_rx.lock().await.take();
+        let streaming_engine = self.streaming_engine.clone();
+        let virtual_keyboard = self.virtual_keyboard.clone();
+
+        if audio_rx_option.is_none() {
+            return Err(anyhow::anyhow!("Audio receiver not available"));
+        }
+
+        let mut audio_rx = audio_rx_option.unwrap();
+        let is_processing_flag = self.is_processing.clone();
+
+        let streaming_task = tokio::spawn(async move {
+            *is_processing_flag.lock().await = true;
+
+            tracing::info!("Streaming processing task started");
+
+            loop {
+                match audio_rx.recv().await {
+                    Ok(samples) => {
+                        tracing::debug!("Received audio chunk: {} samples", samples.len());
+
+                        let mut engine_lock = streaming_engine.lock().await;
+                        if let Some(ref mut engine) = *engine_lock {
+                            match engine.send_audio(&samples) {
+                                Ok(Some(text)) => {
+                                    tracing::info!("Streaming transcription: '{}'", text);
+
+                                    let post_processed =
+                                        transcription::post_process_transcription(&text);
+
+                                    let mut keyboard_lock = virtual_keyboard.lock().await;
+                                    if let Some(ref mut keyboard) = *keyboard_lock {
+                                        if let Err(e) = keyboard.type_text(&post_processed) {
+                                            tracing::error!("Keyboard typing error: {}", e);
+                                        }
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Failed to send audio to streaming engine: {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("Streaming lagged, dropped {} audio chunks", n);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        tracing::info!("Audio receiver closed, stopping streaming processing");
+                        break;
+                    }
+                }
+            }
+
+            *is_processing_flag.lock().await = false;
+        });
+
+        *self.streaming_task_handle.lock().await = Some(streaming_task);
+        Ok(())
+    }
+
     pub async fn stop_vad_processing(&self) {
         *self.is_processing.lock().await = false;
+
+        if let Some(mut streaming_engine) = self.streaming_engine.lock().await.take() {
+            streaming_engine.stop().await;
+            tracing::info!("Streaming engine stopped");
+        }
+
         if let Some(handle) = self.vad_task_handle.lock().await.take() {
             handle.abort();
             tracing::info!("VAD processing task stopped");
+        }
+
+        if let Some(handle) = self.streaming_task_handle.lock().await.take() {
+            handle.abort();
+            tracing::info!("Streaming task stopped");
         }
     }
 }

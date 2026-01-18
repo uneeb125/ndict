@@ -37,6 +37,20 @@ language = "auto"
 # If GPU fails, daemon will automatically fall back to CPU.
 # Uses whisper-rs from Codeberg (https://codeberg.org/tazz4843/whisper-rs)
 backend = "cpu"
+# Enable streaming transcription (true) or batch transcription (false)
+# Streaming: transcribes continuously as you speak (lower latency)
+# Batch: waits for silence before transcribing (higher accuracy)
+streaming_mode = false
+
+[streaming]
+# Streaming transcription settings (only used if whisper.streaming_mode = true)
+# Audio chunk size in ms to send to Whisper (3000 = 3 seconds)
+step_ms = 3000
+# Total audio window length in ms for transcription context (10000 = 10 seconds)
+length_ms = 10000
+# Overlap between windows in ms (500 = 0.5 seconds)
+# Higher overlap = better word boundaries but more processing
+keep_ms = 500
 
 [output]
 # Typing mode: "instant" or "paste"

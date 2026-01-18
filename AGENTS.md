@@ -87,8 +87,8 @@ ndict/
 
 | Component | File | Purpose | State Management |
 |-----------|------|---------|------------------|
-| **DaemonState** | `daemon/src/state.rs` | Manages all daemon components | `Arc<Mutex<DaemonState>>` for shared access |
-| **Config** | `daemon/src/config.rs` | TOML config loading with defaults | Defaults: device="default", sample_rate=16000, VAD thresholds, Whisper model settings |
+| **DaemonState** | `daemon/src/state.rs` | Manages all daemon components | `Arc<Mutex<DaemonState>>` for shared access, fields: `whisper_engine` (batch), `streaming_engine` (streaming), `audio_capture`, `virtual_keyboard`, `vad_task_handle`, `streaming_task_handle` |
+| **Config** | `daemon/src/config.rs` | TOML config loading with defaults | Defaults: device="default", sample_rate=16000, VAD thresholds, Whisper model settings, streaming config |
 | **Socket Path** | `daemon/src/main.rs` | Unix socket location | `/tmp/ndictd.sock` (should use XDG_RUNTIME_DIR) |
 
 ### Audio Pipeline
@@ -115,9 +115,11 @@ ndict/
 
 | Component | File | Details |
 |-----------|------|---------|
-| **Whisper Engine** | `daemon/src/transcription/engine.rs` | whisper-rs FFI bindings | Downloads model from HuggingFace to `~/.local/share/ndict/models/` |
+| **Whisper Engine (Batch)** | `daemon/src/transcription/engine.rs` | whisper-rs FFI bindings - VAD-based batch mode | Downloads model from HuggingFace, waits for silence before transcribing |
+| **Whisper Engine (Streaming)** | `daemon/src/transcription/streaming_engine.rs` | whisper-rs with sliding window - real-time streaming | Transcribes continuously every `step_ms` (default: 3000ms) |
 | **Model Loading** | `daemon/src/transcription/engine.rs` | Async `load_model()` | Supports GPU via `gpu_backend="cuda"` config |
-| **Transcription** | `daemon/src/transcription/engine.rs` | `transcribe()` method | Timeout: 30s, returns cleaned text |
+| **Transcription Mode** | `daemon/src/config.rs` | Configurable via `whisper.streaming_mode` | `false` = batch (higher accuracy, waits for silence), `true` = streaming (lower latency) |
+| **Streaming Parameters** | `daemon/src/config.rs` | `[streaming]` section | `step_ms` (3000), `length_ms` (10000), `keep_ms` (500) |
 | **Post-processing** | `daemon/src/transcription/mod.rs` | Text cleanup | Removes duplicate consecutive words, removes bracketed content `[text] {text} (text)`, normalizes whitespace |
 
 ### Keyboard Output
@@ -234,13 +236,34 @@ pub enum SpeechState {
 **Hysteresis Benefit**: Audio levels between `threshold_stop` and `threshold_start` maintain current state, preventing rapid toggling when audio is near threshold.
 
 ### Audio Processing Pipeline
+
+**Batch Mode (default)**:
 1. **Capture**: `cpal` captures audio chunks (512 samples @ 16kHz ≈ 32ms)
 2. **Broadcast**: Chunks sent via `broadcast::Sender<Vec<f32>>` (capacity: 100)
 3. **VAD Processing Loop**: Background task receives chunks, processes with SpeechDetector
-4. **Speech Detection**: When speech segment complete, spawn transcription task
-5. **Whisper Transcription**: Separate async task (30s timeout)
+4. **Speech Detection**: When speech segment complete (silence detected), spawn transcription task
+5. **Whisper Transcription**: Separate async task (30s timeout) processes complete speech
 6. **Post-processing**: Remove duplicates and brackets
 7. **Keyboard Output**: Type to active Wayland window (5s timeout)
+
+**Streaming Mode** (configured via `whisper.streaming_mode = true`):
+1. **Capture**: `cpal` captures audio chunks (512 samples @ 16kHz ≈ 32ms)
+2. **Broadcast**: Chunks sent via `broadcast::Sender<Vec<f32>>` (capacity: 100)
+3. **Streaming Processing Loop**: Background task receives chunks and sends directly to StreamingEngine
+4. **Sliding Window**: StreamingEngine accumulates audio, processes windows when buffer full
+5. **Whisper Transcription**: Each window transcribed independently (no VAD, continuous)
+6. **Deduplication**: Tracks `last_text` to avoid typing duplicate transcriptions
+7. **Post-processing**: Remove duplicates and brackets
+8. **Keyboard Output**: Type to active Wayland window (5s timeout)
+
+**Streaming Parameters**:
+- `step_ms`: Audio chunk size to transcribe (default: 3000ms)
+- `length_ms`: Total window length for context (default: 10000ms)
+- `keep_ms`: Overlap between windows for word boundaries (default: 500ms)
+
+**Trade-offs**:
+- **Batch**: Higher accuracy (full context), higher latency (waits for silence)
+- **Streaming**: Lower latency (continuous), potential context window effects
 
 ### Command Execution Separation (NEW - Architecture Improvement)
 **From:** `daemon/src/server.rs`

@@ -11,6 +11,8 @@ pub struct Config {
     #[serde(default)]
     pub whisper: WhisperConfig,
     #[serde(default)]
+    pub streaming: StreamingConfig,
+    #[serde(default)]
     pub output: OutputConfig,
 }
 
@@ -73,6 +75,18 @@ pub struct WhisperConfig {
     pub language: String,
     #[serde(default = "default_backend")]
     pub backend: String,
+    #[serde(default = "default_streaming_mode")]
+    pub streaming_mode: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+pub struct StreamingConfig {
+    #[serde(default = "default_streaming_step_ms")]
+    pub step_ms: u32,
+    #[serde(default = "default_streaming_length_ms")]
+    pub length_ms: u32,
+    #[serde(default = "default_streaming_keep_ms")]
+    pub keep_ms: u32,
 }
 
 fn default_model_url() -> String {
@@ -84,6 +98,22 @@ fn default_language() -> String {
 
 fn default_backend() -> String {
     "cpu".to_string()
+}
+
+fn default_streaming_mode() -> bool {
+    false
+}
+
+fn default_streaming_step_ms() -> u32 {
+    3000
+}
+
+fn default_streaming_length_ms() -> u32 {
+    10000
+}
+
+fn default_streaming_keep_ms() -> u32 {
+    500
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
@@ -118,6 +148,12 @@ impl Default for Config {
                         .to_string(),
                 language: "auto".to_string(),
                 backend: "cpu".to_string(),
+                streaming_mode: false,
+            },
+            streaming: StreamingConfig {
+                step_ms: 3000,
+                length_ms: 10000,
+                keep_ms: 500,
             },
             output: OutputConfig {
                 typing_mode: "instant".to_string(),
@@ -176,6 +212,11 @@ mod tests {
         );
         assert_eq!(config.whisper.language, "auto");
         assert_eq!(config.whisper.backend, "cpu");
+        assert_eq!(config.whisper.streaming_mode, false);
+
+        assert_eq!(config.streaming.step_ms, 3000);
+        assert_eq!(config.streaming.length_ms, 10000);
+        assert_eq!(config.streaming.keep_ms, 500);
 
         assert_eq!(config.output.typing_mode, "instant");
     }

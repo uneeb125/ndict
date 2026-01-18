@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod streaming_engine;
 
 pub fn post_process_transcription(text: &str) -> String {
     let mut text = text.trim().to_string();
