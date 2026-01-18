@@ -65,21 +65,16 @@ fn default_threshold_stop() -> f32 {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
 pub struct WhisperConfig {
-    #[serde(default = "default_model")]
-    pub model: String,
     #[serde(default)]
     pub model_path: Option<String>,
     #[serde(default = "default_model_url")]
     pub model_url: String,
     #[serde(default = "default_language")]
     pub language: String,
-    #[serde(default = "default_gpu_backend")]
-    pub gpu_backend: String,
+    #[serde(default = "default_backend")]
+    pub backend: String,
 }
 
-fn default_model() -> String {
-    "base".to_string()
-}
 fn default_model_url() -> String {
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin".to_string()
 }
@@ -87,7 +82,7 @@ fn default_language() -> String {
     "auto".to_string()
 }
 
-fn default_gpu_backend() -> String {
+fn default_backend() -> String {
     "cpu".to_string()
 }
 
@@ -117,13 +112,12 @@ impl Default for Config {
                 min_silence_duration_ms: 1000,
             },
             whisper: WhisperConfig {
-                model: "base".to_string(),
                 model_path: None,
                 model_url:
                     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
                         .to_string(),
                 language: "auto".to_string(),
-                gpu_backend: "cpu".to_string(),
+                backend: "cpu".to_string(),
             },
             output: OutputConfig {
                 typing_mode: "instant".to_string(),
@@ -176,13 +170,12 @@ mod tests {
         assert_eq!(config.vad.min_speech_duration_ms, 250);
         assert_eq!(config.vad.min_silence_duration_ms, 1000);
 
-        assert_eq!(config.whisper.model, "base");
         assert_eq!(
             config.whisper.model_url,
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
         );
         assert_eq!(config.whisper.language, "auto");
-        assert_eq!(config.whisper.gpu_backend, "cpu");
+        assert_eq!(config.whisper.backend, "cpu");
 
         assert_eq!(config.output.typing_mode, "instant");
     }
@@ -226,10 +219,9 @@ mod tests {
             min_silence_duration_ms = 2000
 
             [whisper]
-            model = "tiny"
             model_url = "http://example.com/model.bin"
             language = "en"
-            gpu_backend = "cuda"
+            backend = "gpu"
 
             [output]
             typing_mode = "delayed"
@@ -245,10 +237,9 @@ mod tests {
         assert_eq!(config.vad.threshold_stop, 0.02);
         assert_eq!(config.vad.min_speech_duration_ms, 500);
         assert_eq!(config.vad.min_silence_duration_ms, 2000);
-        assert_eq!(config.whisper.model, "tiny");
         assert_eq!(config.whisper.model_url, "http://example.com/model.bin");
         assert_eq!(config.whisper.language, "en");
-        assert_eq!(config.whisper.gpu_backend, "cuda");
+        assert_eq!(config.whisper.backend, "gpu");
         assert_eq!(config.output.typing_mode, "delayed");
     }
 
@@ -300,8 +291,8 @@ mod tests {
     }
 
     #[test]
-    fn test_default_gpu_backend() {
-        let value = default_gpu_backend();
+    fn test_default_backend() {
+        let value = default_backend();
         assert_eq!(value, "cpu");
     }
 

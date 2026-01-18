@@ -25,9 +25,6 @@ min_silence_duration_ms = 1000
 min_speech_duration_ms = 250
 
 [whisper]
-# Whisper model to use (tiny, base, small, medium, large)
-# base is recommended for most use cases
-model = "base"
 # Optional: custom path to Whisper model file
 # model_path = "/path/to/model.ggml"
 # URL to download Whisper model from if not found locally
@@ -35,6 +32,8 @@ model = "base"
 model_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
 # Language code (e.g., "en", "es", "auto" for auto-detection)
 language = "auto"
+# Backend to use: cpu (default), gpu, cuda
+backend = "cpu"
 
 [output]
 # Typing mode: "instant" or "paste"

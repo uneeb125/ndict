@@ -77,7 +77,7 @@ impl DaemonServer {
 
                 let mut whisper_engine = WhisperEngine::new(
                     state_guard.config.whisper.model_url.clone(),
-                    state_guard.config.whisper.model.clone(),
+                    state_guard.config.whisper.backend.clone(),
                 )?;
                 whisper_engine.load_model().await?;
                 *state_guard.whisper_engine.lock().await = Some(whisper_engine);
@@ -160,7 +160,7 @@ impl DaemonServer {
 
                     let mut whisper_engine = WhisperEngine::new(
                         state_guard.config.whisper.model_url.clone(),
-                        state_guard.config.whisper.model.clone(),
+                        state_guard.config.whisper.backend.clone(),
                     )?;
                     whisper_engine.load_model().await?;
                     *state_guard.whisper_engine.lock().await = Some(whisper_engine);

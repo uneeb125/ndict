@@ -11,12 +11,12 @@ pub struct WhisperEngine {
     model_loaded: bool,
     model_path: PathBuf,
     model_url: String,
-    model_name: String,
+    backend: String,
 }
 
 impl WhisperEngine {
-    pub fn new(model_url: String, model_name: String) -> Result<Self> {
-        let model_path = Self::find_model_path(&model_name)?;
+    pub fn new(model_url: String, backend: String) -> Result<Self> {
+        let model_path = Self::find_model_path(&model_url)?;
 
         Ok(Self {
             context: None,
@@ -24,7 +24,7 @@ impl WhisperEngine {
             model_loaded: false,
             model_path,
             model_url,
-            model_name,
+            backend,
         })
     }
 
@@ -39,22 +39,31 @@ impl WhisperEngine {
             self.download_model().await?;
         }
 
-        // --- CHANGE START: Configure Parameters for GPU ---
+        let use_gpu = match self.backend.to_lowercase().as_str() {
+            "gpu" => true,
+            "cuda" => true,
+            "cpu" => false,
+            _ => {
+                warn!(
+                    "Invalid backend value '{}', defaulting to CPU. Valid options: cpu, gpu, cuda",
+                    self.backend
+                );
+                false
+            }
+        };
+
         let mut params = WhisperContextParameters::default();
-        // This tells whisper.cpp to attempt to use the GPU offload
-        params.use_gpu(true);
-        // Optional: specific GPU device index (defaults to 0)
-        // params.gpu_device(0);
-        // --- CHANGE END ---
+        if use_gpu {
+            info!("Using GPU backend for Whisper");
+            params.use_gpu(true);
+        } else {
+            info!("Using CPU backend for Whisper");
+            params.use_gpu(false);
+        }
 
-        let ctx = WhisperContext::new_with_params(
-            self.model_path.to_str().unwrap(),
-            params, // Pass the modified params here
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {}", e))?;
+        let ctx = WhisperContext::new_with_params(self.model_path.to_str().unwrap(), params)
+            .map_err(|e| anyhow::anyhow!("Failed to load Whisper model: {}", e))?;
 
-        // Create WhisperState once to maintain stable GPU memory usage
-        // This keeps compute/scratch buffers (KV cache, activation buffers) allocated
         let state = ctx
             .create_state()
             .map_err(|e| anyhow::anyhow!("Failed to create Whisper state: {}", e))?;
@@ -63,7 +72,11 @@ impl WhisperEngine {
         self.state = Some(state);
         self.model_loaded = true;
 
-        info!("Whisper model and state loaded successfully (GPU requested, stable memory usage)");
+        let backend_name = if use_gpu { "GPU" } else { "CPU" };
+        info!(
+            "Whisper model and state loaded successfully ({} backend, stable memory usage)",
+            backend_name
+        );
         Ok(())
     }
 
@@ -136,19 +149,19 @@ impl WhisperEngine {
         padded
     }
 
-    pub fn find_model_path(model_name: &str) -> Result<PathBuf> {
-        let model_filename = format!("ggml-{}.bin", model_name);
-        let model_filename_en = format!("ggml-{}.en.bin", model_name);
+    pub fn find_model_path(model_url: &str) -> Result<PathBuf> {
+        let model_filename = model_url
+            .rsplit('/')
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Invalid model URL: cannot extract filename"))?;
+
+        info!("Extracted model filename from URL: {}", model_filename);
 
         let possible_paths: Vec<Option<PathBuf>> = vec![
-            dirs::home_dir().map(|p| p.join(".local/share/ndict/").join(&model_filename)),
-            dirs::home_dir().map(|p| p.join(".local/share/ndict/").join(&model_filename_en)),
-            Some(PathBuf::from("/usr/share/whisper/").join(&model_filename)),
-            Some(PathBuf::from("/usr/share/whisper/").join(&model_filename_en)),
-            Some(PathBuf::from("./models/").join(&model_filename)),
-            Some(PathBuf::from("./models/").join(&model_filename_en)),
-            Some(PathBuf::from(&model_filename)),
-            Some(PathBuf::from(&model_filename_en)),
+            dirs::home_dir().map(|p| p.join(".local/share/ndict/").join(model_filename)),
+            Some(PathBuf::from("/usr/share/whisper/").join(model_filename)),
+            Some(PathBuf::from("./models/").join(model_filename)),
+            Some(PathBuf::from(model_filename)),
         ];
 
         for path in possible_paths {
@@ -164,7 +177,7 @@ impl WhisperEngine {
         let default_path = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
             .join(".local/share/ndict/")
-            .join(&model_filename);
+            .join(model_filename);
 
         warn!("Model not found, will use default path: {:?}", default_path);
         Ok(default_path)
@@ -218,32 +231,36 @@ mod tests {
 
     #[test]
     fn test_find_model_path_existing() {
-        let path = WhisperEngine::find_model_path("base").unwrap();
+        let url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+        let path = WhisperEngine::find_model_path(url).unwrap();
 
-        assert!(path.to_str().unwrap().contains("ggml-base"));
+        assert!(path.to_str().unwrap().contains("ggml-base.bin"));
         assert!(path.extension().unwrap() == "bin");
     }
 
     #[test]
-    fn test_find_model_path_en_variant() {
-        let path = WhisperEngine::find_model_path("base").unwrap();
-
-        assert!(path.to_str().unwrap().contains("ggml-base"));
-    }
-
-    #[test]
     fn test_find_model_path_fallback() {
-        let path = WhisperEngine::find_model_path("nonexistent").unwrap();
+        let url = "https://example.com/models/ggml-nonexistent.bin";
+        let path = WhisperEngine::find_model_path(url).unwrap();
 
         assert!(path.to_str().unwrap().contains("ggml-nonexistent.bin"));
         assert!(path.to_str().unwrap().contains(".local/share/ndict"));
     }
 
     #[test]
+    fn test_find_model_path_from_different_url() {
+        let url = "https://custom-host.com/path/to/ggml-tiny.en.bin";
+        let path = WhisperEngine::find_model_path(url).unwrap();
+
+        assert!(path.to_str().unwrap().contains("ggml-tiny.en.bin"));
+        assert!(path.extension().unwrap() == "bin");
+    }
+
+    #[test]
     fn test_pad_audio_no_padding_needed() {
         let engine = WhisperEngine::new(
             "https://example.com/model.bin".to_string(),
-            "base".to_string(),
+            "cpu".to_string(),
         )
         .unwrap();
 
@@ -257,7 +274,7 @@ mod tests {
     fn test_pad_audio_with_padding() {
         let engine = WhisperEngine::new(
             "https://example.com/model.bin".to_string(),
-            "base".to_string(),
+            "cpu".to_string(),
         )
         .unwrap();
 
@@ -273,7 +290,7 @@ mod tests {
     fn test_pad_audio_exact_length() {
         let engine = WhisperEngine::new(
             "https://example.com/model.bin".to_string(),
-            "base".to_string(),
+            "cpu".to_string(),
         )
         .unwrap();
 
@@ -288,7 +305,7 @@ mod tests {
     fn test_pad_audio_empty() {
         let engine = WhisperEngine::new(
             "https://example.com/model.bin".to_string(),
-            "base".to_string(),
+            "cpu".to_string(),
         )
         .unwrap();
 
@@ -303,12 +320,12 @@ mod tests {
     fn test_new_whisper_engine() {
         let engine = WhisperEngine::new(
             "https://huggingface.co/model.bin".to_string(),
-            "tiny".to_string(),
+            "cpu".to_string(),
         )
         .unwrap();
 
         assert!(engine.model_url.contains("huggingface.co"));
-        assert!(engine.model_name == "tiny");
+        assert_eq!(engine.backend, "cpu");
         assert_eq!(engine.model_loaded, false);
         assert!(engine.context.is_none());
         assert!(engine.state.is_none());
@@ -317,8 +334,9 @@ mod tests {
     #[test]
     fn test_new_whisper_engine_custom_url() {
         let custom_url = "http://custom.com/model.bin".to_string();
-        let engine = WhisperEngine::new(custom_url.clone(), "base".to_string()).unwrap();
+        let engine = WhisperEngine::new(custom_url.clone(), "gpu".to_string()).unwrap();
 
         assert_eq!(engine.model_url, custom_url);
+        assert_eq!(engine.backend, "gpu");
     }
 }
