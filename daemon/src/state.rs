@@ -106,7 +106,9 @@ impl DaemonState {
                             samples.get(1).unwrap_or(&0.0),
                             samples.get(2).unwrap_or(&0.0)
                         );
-                        if let Some(speech_audio) = speech_detector.process_audio(&samples) {
+                        let vad_result = speech_detector.process_audio(&samples);
+                        tracing::debug!("VAD returned: Some={}", vad_result.is_some());
+                        if let Some(speech_audio) = vad_result {
                             tracing::info!(
                                 "Speech detected, starting transcription: {} samples",
                                 speech_audio.len()
