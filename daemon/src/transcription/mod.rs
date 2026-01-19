@@ -19,6 +19,10 @@ pub fn post_process_transcription(text: &str) -> String {
     let re_brackets = regex::Regex::new(r"\[.*?\]|\{.*?\}|\(.*?\)").unwrap();
     text = re_brackets.replace_all(&text, "").to_string();
 
+    if text.ends_with(&['.', '?']) {
+        text.push(' ');
+    }
+
     let re_final = regex::Regex::new(r"\s+").unwrap();
     text = re_final.replace_all(&text, " ").trim().to_string();
 

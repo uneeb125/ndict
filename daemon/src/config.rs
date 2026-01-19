@@ -73,6 +73,8 @@ pub struct WhisperConfig {
     pub model_url: String,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_n_thread")]
+    pub n_thread: u32,
     #[serde(default = "default_backend")]
     pub backend: String,
     #[serde(default = "default_streaming_mode")]
@@ -92,8 +94,13 @@ pub struct StreamingConfig {
 fn default_model_url() -> String {
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin".to_string()
 }
+
 fn default_language() -> String {
-    "auto".to_string()
+    "en".to_string()
+}
+
+fn default_n_thread() -> u32 {
+    4
 }
 
 fn default_backend() -> String {
@@ -146,7 +153,8 @@ impl Default for Config {
                 model_url:
                     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
                         .to_string(),
-                language: "auto".to_string(),
+                language: "en".to_string(),
+                n_thread: 4,
                 backend: "cpu".to_string(),
                 streaming_mode: false,
             },
@@ -210,8 +218,9 @@ mod tests {
             config.whisper.model_url,
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
         );
-        assert_eq!(config.whisper.language, "auto");
+        assert_eq!(config.whisper.language, "en");
         assert_eq!(config.whisper.backend, "cpu");
+        assert_eq!(config.whisper.n_thread, 4);
         assert_eq!(config.whisper.streaming_mode, false);
 
         assert_eq!(config.streaming.step_ms, 3000);
