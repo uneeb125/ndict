@@ -10,6 +10,7 @@ ExecStop=/bin/sh -c 'pkill -f ndictd; rm -f $XDG_RUNTIME_DIR/ndictd.sock 2>/dev/
 Restart=on-failure
 RestartSec=5
 AmbientCapabilities=CAP_SYS_INPUT
+PassEnvironment=WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
 
 [Install]
 WantedBy=default.target

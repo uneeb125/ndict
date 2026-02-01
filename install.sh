@@ -133,27 +133,13 @@ fi
 # ==========================================
 # UPDATE SERVICE FILE
 # ==========================================
-echo "Updating systemd service..."
-cat > "$DEST_SERVICE_DIR/$SERVICE_NAME" <<EOF
-[Unit]
-Description=ndict - Speech to Text Daemon
-After=graphical-session.target network.target
-PartOf=graphical-session.target
+echo "Installing systemd service..."
+if [ ! -f "./systemd/ndictd.service" ]; then
+    echo -e "${RED}Error: systemd service file not found at ./systemd/ndictd.service${NC}"
+    exit 1
+fi
 
-[Service]
-Type=simple
-Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStartPre=/usr/bin/mkdir -p %h/.local/share/ndict
-# Ensure lock file is gone on fresh start
-ExecStartPre=/bin/rm -f /tmp/ndict.state
-ExecStart=%h/.local/bin/$DAEMON_NAME
-ExecStopPost=/bin/rm -f /tmp/ndict.state
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
+cp "./systemd/ndictd.service" "$DEST_SERVICE_DIR/$SERVICE_NAME"
 
 # ==========================================
 # RELOAD AND START
