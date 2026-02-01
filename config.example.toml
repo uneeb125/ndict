@@ -10,6 +10,9 @@ sample_rate = 16000
 chunk_size = 512
 # Audio gain multiplier (increase if microphone is too quiet)
 gain = 1.0
+# Number of audio channels (1 = mono, 2 = stereo)
+# Whisper requires mono audio; stereo will be downsampled to mono
+channels = 1
 
 [vad]
 # Threshold to START recording (audio level must be above this to begin)
@@ -41,6 +44,11 @@ backend = "cpu"
 # Streaming: transcribes continuously as you speak (lower latency)
 # Batch: waits for silence before transcribing (higher accuracy)
 streaming_mode = false
+# Minimum audio samples required for Whisper transcription (18000 = ~1.125s at 16kHz)
+# Audio shorter than this will be padded with silence before transcription
+min_audio_samples = 18000
+# Whisper sampling strategy: "greedy" (faster) or "beam" (slower, potentially more accurate)
+sampling_strategy = "greedy"
 
 [streaming]
 # Streaming transcription settings (only used if whisper.streaming_mode = true)
@@ -52,6 +60,38 @@ length_ms = 10000
 # Higher overlap = better word boundaries but more processing
 keep_ms = 500
 
+[buffer]
+# Audio buffer configuration for internal audio streaming
+# Number of audio chunks to buffer (100 = ~3 seconds at 32ms/chunk)
+# Higher values = more tolerance for processing delays, higher memory usage
+broadcast_capacity = 100
+
 [output]
 # Typing mode: "instant" or "paste"
 typing_mode = "instant"
+
+[rate_limit]
+# Command rate limiting to prevent flooding
+# Maximum sustained rate of commands per second
+commands_per_second = 10
+# Maximum burst of commands (allows short bursts)
+burst_capacity = 20
+# Enable/disable rate limiting (true = enabled, false = disabled)
+enabled = true
+
+[timeouts]
+# Whisper transcription timeout in seconds
+# How long to wait for Whisper to finish transcribing audio before giving up
+whisper_timeout_seconds = 30
+# Keyboard typing timeout in seconds
+# How long to wait for virtual keyboard to finish typing text before giving up
+keyboard_timeout_seconds = 5
+# Socket connection timeout in seconds
+# How long to wait for client to connect to daemon's Unix socket
+socket_connect_timeout_seconds = 5
+# Socket operation timeout in seconds
+# How long to wait for socket operations (send/receive) to complete
+socket_operation_timeout_seconds = 10
+# Model download timeout in seconds
+# How long to wait for Whisper model download to complete before giving up
+model_download_timeout_seconds = 300

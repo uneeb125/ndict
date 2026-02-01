@@ -130,7 +130,7 @@ mod tests {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
                 let (tx, mut rx) = broadcast::channel(100);
-                let mut capture = AudioCapture::new().expect("Failed audio capture");
+                let mut capture = AudioCapture::new(16000).expect("Failed audio capture");
                 capture.start(tx).expect("Failed start capture");
 
                 let mut vad = VoiceActivityDetector::new(current_start, current_stop)
@@ -226,7 +226,7 @@ mod tests {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
             let (tx, mut rx) = broadcast::channel(100);
-            let mut capture = AudioCapture::new().expect("Failed capture");
+            let mut capture = AudioCapture::new(16000).expect("Failed capture");
             capture.start(tx).expect("Failed start");
 
             let mut vad = VoiceActivityDetector::new(current_start, current_stop).unwrap();
@@ -317,7 +317,7 @@ mod tests {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
             let (tx, mut rx) = broadcast::channel(100);
-            let mut capture = AudioCapture::new().expect("Failed capture");
+            let mut capture = AudioCapture::new(16000).expect("Failed capture");
             capture.start(tx).expect("Failed start");
 
             let mut vad = VoiceActivityDetector::new(current_start, current_stop).unwrap();

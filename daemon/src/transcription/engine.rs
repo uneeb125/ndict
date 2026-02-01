@@ -1,6 +1,9 @@
 use anyhow::Result;
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
-use tracing::{debug, info, warn};
+use std::time::Duration;
+use tokio::time::{sleep, timeout};
+use tracing::{debug, error, info, warn};
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
 };
@@ -11,11 +14,32 @@ pub struct WhisperEngine {
     model_loaded: bool,
     model_path: PathBuf,
     model_url: String,
+    model_checksum: Option<String>,
     backend: String,
+    min_audio_samples: usize,
+    sampling_strategy: String,
 }
 
 impl WhisperEngine {
     pub fn new(model_url: String, backend: String) -> Result<Self> {
+        Self::new_with_checksum_and_params(model_url, backend, None, 18000, "greedy".to_string())
+    }
+
+    pub fn new_with_checksum(
+        model_url: String,
+        backend: String,
+        model_checksum: Option<String>,
+    ) -> Result<Self> {
+        Self::new_with_checksum_and_params(model_url, backend, model_checksum, 18000, "greedy".to_string())
+    }
+
+    pub fn new_with_checksum_and_params(
+        model_url: String,
+        backend: String,
+        model_checksum: Option<String>,
+        min_audio_samples: usize,
+        sampling_strategy: String,
+    ) -> Result<Self> {
         let model_path = Self::find_model_path(&model_url)?;
 
         Ok(Self {
@@ -24,7 +48,10 @@ impl WhisperEngine {
             model_loaded: false,
             model_path,
             model_url,
+            model_checksum,
             backend,
+            min_audio_samples,
+            sampling_strategy,
         })
     }
 
@@ -37,6 +64,22 @@ impl WhisperEngine {
                 self.model_path
             );
             self.download_model().await?;
+        } else {
+            // Verify existing model if checksum is configured
+            if let Some(ref expected_checksum) = self.model_checksum {
+                info!("Model file exists, verifying checksum...");
+                let actual_checksum = self.compute_file_checksum(&self.model_path)?;
+                if &actual_checksum == expected_checksum {
+                    info!("Model checksum verification passed: {}", actual_checksum);
+                } else {
+                    error!(
+                        "Model checksum mismatch! Expected: {}, Got: {}",
+                        expected_checksum, actual_checksum
+                    );
+                    warn!("Re-downloading model due to checksum mismatch...");
+                    self.download_model().await?;
+                }
+            }
         }
 
         let use_gpu = match self.backend.to_lowercase().as_str() {
@@ -61,9 +104,9 @@ impl WhisperEngine {
             params.use_gpu(false);
         }
 
-        let ctx = if use_gpu {
+        let (ctx, actually_using_gpu) = if use_gpu {
             match WhisperContext::new_with_params(self.model_path.to_str().unwrap(), params) {
-                Ok(ctx) => ctx,
+                Ok(ctx) => (ctx, true),
                 Err(e) => {
                     warn!(
                         "GPU initialization failed: {}. Falling back to CPU backend. \
@@ -73,14 +116,15 @@ impl WhisperEngine {
                     );
                     let mut cpu_params = WhisperContextParameters::default();
                     cpu_params.use_gpu(false);
-                    WhisperContext::new_with_params(self.model_path.to_str().unwrap(), cpu_params)
+                    let ctx = WhisperContext::new_with_params(self.model_path.to_str().unwrap(), cpu_params)
                         .map_err(|e| {
                         anyhow::anyhow!("Failed to load Whisper model (CPU fallback): {}", e)
-                    })?
+                    })?;
+                    (ctx, false)
                 }
             }
         } else {
-            WhisperContext::new_with_params(self.model_path.to_str().unwrap(), params)?
+            (WhisperContext::new_with_params(self.model_path.to_str().unwrap(), params)?, false)
         };
 
         let state = ctx
@@ -91,42 +135,43 @@ impl WhisperEngine {
         self.state = Some(state);
         self.model_loaded = true;
 
-        let backend_name = if use_gpu { "GPU" } else { "CPU" };
-        if use_gpu {
-            info!(
-                "Whisper model and state loaded successfully ({} backend attempted, CPU fallback used)",
-                backend_name
+        let backend_name = if actually_using_gpu { "GPU" } else { "CPU" };
+        if use_gpu && !actually_using_gpu {
+            warn!(
+                "Whisper model loaded successfully using CPU backend (GPU fallback activated)"
             );
         } else {
             info!(
-                "Whisper model and state loaded successfully ({} backend, stable memory usage)",
+                "Whisper model and state loaded successfully ({} backend)",
                 backend_name
             );
         }
         Ok(())
     }
 
-    pub async fn transcribe(&mut self, audio: &[f32]) -> Result<String> {
+    pub async fn transcribe(&mut self, audio: &[f32], language: &str) -> Result<String> {
         if !self.model_loaded {
             return Err(anyhow::anyhow!("Model not loaded"));
         }
 
-        debug!("Transcribing {} audio samples", audio.len());
+        debug!("Transcribing {} audio samples with language: {}", audio.len(), language);
 
-        let audio = self.pad_audio(audio, 18000);
+        let audio = self.pad_audio(audio, self.min_audio_samples as u32);
+
+        debug!("Setting transcription parameters...");
+        let sampling_strategy = self.parse_sampling_strategy();
 
         let state = self
             .state
             .as_mut()
             .ok_or_else(|| anyhow::anyhow!("WhisperState not initialized"))?;
 
-        debug!("Setting transcription parameters...");
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        let mut params = FullParams::new(sampling_strategy);
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        params.set_language(Some("en"));
+        params.set_language(Some(language));
 
         debug!("Running Whisper transcription...");
         state
@@ -153,6 +198,23 @@ impl WhisperEngine {
         debug!("Transcription: '{}' ({} ms)", cleaned, duration_ms);
 
         Ok(cleaned)
+    }
+
+    fn parse_sampling_strategy(&self) -> SamplingStrategy {
+        match self.sampling_strategy.to_lowercase().as_str() {
+            "greedy" => SamplingStrategy::Greedy { best_of: 1 },
+            "beam" => SamplingStrategy::BeamSearch {
+                beam_size: 5,
+                patience: 1.0,
+            },
+            _ => {
+                tracing::warn!(
+                    "Unknown sampling strategy '{}', defaulting to greedy",
+                    self.sampling_strategy
+                );
+                SamplingStrategy::Greedy { best_of: 1 }
+            }
+        }
     }
 
     fn pad_audio(&self, audio: &[f32], sample_rate: u32) -> Vec<f32> {
@@ -221,33 +283,284 @@ impl WhisperEngine {
 
         info!("Downloading model from: {}", model_url);
 
-        let response = reqwest::get(model_url)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to download model: {}", e))?;
+        // Create temporary file for atomic write
+        let temp_path = format!("{}.tmp", self.model_path.display());
+        let temp_path = PathBuf::from(&temp_path);
 
-        let total_bytes = response.content_length().unwrap_or(0);
-        let mut downloaded = 0u64;
-        let mut stream = response.bytes_stream();
+        // Clean up any existing temporary file
+        if temp_path.exists() {
+            warn!("Removing existing temporary file: {:?}", temp_path);
+            tokio::fs::remove_file(&temp_path).await?;
+        }
 
-        let mut file = tokio::fs::File::create(&self.model_path).await?;
+        // Retry logic with exponential backoff
+        let max_retries = 3;
+        let mut last_error = None;
 
+        for attempt in 1..=max_retries {
+            debug!("Download attempt {}/{}", attempt, max_retries);
+
+            match self
+                .download_model_with_checksum(&temp_path, model_url, attempt, max_retries)
+                .await
+            {
+                Ok(()) => {
+                    // Verify checksum if provided
+                    if let Some(ref expected_checksum) = self.model_checksum {
+                        info!("Verifying model checksum...");
+                        let actual_checksum = self.compute_file_checksum(&temp_path)?;
+                        if &actual_checksum != expected_checksum {
+                            error!(
+                                "Checksum verification failed! Expected: {}, Got: {}",
+                                expected_checksum, actual_checksum
+                            );
+                            // Clean up the failed download
+                            tokio::fs::remove_file(&temp_path).await?;
+                            last_error = Some(anyhow::anyhow!(
+                                "Checksum mismatch: expected {}, got {}",
+                                expected_checksum,
+                                actual_checksum
+                            ));
+                            continue;
+                        }
+                        info!("Checksum verification passed: {}", actual_checksum);
+                    }
+
+                    // Atomic rename from temp to final path
+                    info!("Atomic rename: {:?} -> {:?}", temp_path, self.model_path);
+                    tokio::fs::rename(&temp_path, &self.model_path).await?;
+                    info!("Model downloaded and verified successfully to: {:?}", self.model_path);
+                    return Ok(());
+                }
+                Err(e) => {
+                    let error_msg = format!("{}", e);
+                    error!("Download attempt {} failed: {}", attempt, error_msg);
+                    last_error = Some(anyhow::anyhow!(error_msg));
+
+                    // Clean up partial download
+                    if temp_path.exists() {
+                        warn!("Cleaning up partial download: {:?}", temp_path);
+                        if let Err(cleanup_err) = tokio::fs::remove_file(&temp_path).await {
+                            warn!("Failed to clean up temporary file: {}", cleanup_err);
+                        }
+                    }
+
+                    // Exponential backoff before next retry
+                    if attempt < max_retries {
+                        let delay_ms = 1000 * 2_u64.pow(attempt as u32);
+                        info!(
+                            "Waiting {} ms before retry (attempt {}/{})...",
+                            delay_ms, attempt + 1, max_retries
+                        );
+                        sleep(Duration::from_millis(delay_ms)).await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            anyhow::anyhow!("Failed to download model after {} attempts", max_retries)
+        }))
+    }
+
+    async fn download_model_with_checksum(
+        &self,
+        temp_path: &PathBuf,
+        model_url: &str,
+        attempt: usize,
+        max_attempts: usize,
+    ) -> Result<()> {
         use futures_util::StreamExt;
         use tokio::io::AsyncWriteExt;
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| anyhow::anyhow!("Download error: {}", e))?;
-            downloaded += chunk.len() as u64;
+        info!(
+            "Starting download (attempt {}/{}): {}",
+            attempt, max_attempts, model_url
+        );
 
-            if total_bytes > 0 {
-                let progress = (downloaded * 100) / total_bytes;
-                info!("Download progress: {}%", progress);
-            }
+        // Configure client with timeouts
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(300)) // 5 minute total timeout for download
+            .connect_timeout(Duration::from_secs(30)) // 30 second connect timeout
+            .redirect(reqwest::redirect::Policy::limited(5)) // Max 5 redirects
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
 
-            file.write_all(&chunk).await?;
+        // Send HEAD request to get file size
+        let head_response = client
+            .head(model_url)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("HEAD request failed: {}", e))?;
+
+        let expected_size = head_response.content_length();
+
+        // Check for ETag (optional, for HuggingFace)
+        let etag = head_response.headers().get("etag").and_then(|v| v.to_str().ok());
+        if let Some(etag) = etag {
+            info!("Server ETag: {}", etag);
         }
 
-        info!("Model downloaded successfully to: {:?}", self.model_path);
+        // Start streaming download
+        let response = client
+            .get(model_url)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("GET request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "HTTP error: {}",
+                response.status()
+            ));
+        }
+
+        let total_bytes = response.content_length();
+        let mut downloaded = 0u64;
+        let mut stream = response.bytes_stream();
+
+        // Create SHA256 hasher
+        let mut hasher = Sha256::new();
+
+        // Open temp file for writing
+        let mut file = tokio::fs::File::create(temp_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create temp file: {}", e))?;
+
+        let start_time = std::time::Instant::now();
+
+        // Download chunks with streaming checksum calculation
+        loop {
+            // Add 30-second timeout to each chunk read
+            let chunk_result = timeout(Duration::from_secs(30), stream.next()).await;
+
+            let chunk = match chunk_result {
+                Ok(Some(Ok(c))) => c,
+                Ok(Some(Err(e))) => {
+                    return Err(anyhow::anyhow!("Download error: {}", e));
+                }
+                Ok(None) => {
+                    // End of stream
+                    break;
+                }
+                Err(_) => {
+                    // Timeout occurred
+                    return Err(anyhow::anyhow!(
+                        "Download chunk read timeout: server did not send data within 30 seconds"
+                    ));
+                }
+            };
+            let chunk_len = chunk.len();
+            downloaded += chunk_len as u64;
+
+            // Update SHA256 hash with this chunk
+            hasher.update(&chunk);
+
+            // Write to file
+            file.write_all(&chunk).await.map_err(|e| {
+                anyhow::anyhow!("Failed to write to temp file: {}", e)
+            })?;
+
+            // Log progress every 10% or every 10 seconds
+            if total_bytes.is_some() {
+                let total = total_bytes.unwrap();
+                let progress = (downloaded * 100) / total;
+                let elapsed = start_time.elapsed().as_secs();
+
+                if progress % 10 == 0 || elapsed % 10 == 0 {
+                    let speed = if elapsed > 0 {
+                        downloaded / elapsed
+                    } else {
+                        0
+                    };
+                    info!(
+                        "Download progress: {}% ({}/{} bytes, {} bytes/s)",
+                        progress,
+                        Self::pretty_bytes(downloaded),
+                        Self::pretty_bytes(total),
+                        Self::pretty_bytes(speed)
+                    );
+                }
+            } else {
+                let elapsed = start_time.elapsed().as_secs();
+                if elapsed % 10 == 0 {
+                    info!(
+                        "Download progress: {} bytes downloaded...",
+                        Self::pretty_bytes(downloaded)
+                    );
+                }
+            }
+        }
+
+        // Flush and close the file
+        file.flush().await.map_err(|e| {
+            anyhow::anyhow!("Failed to flush temp file: {}", e)
+        })?;
+        drop(file);
+
+        // Verify file size matches expected size from HEAD request
+        if let Some(expected) = expected_size {
+            let metadata = tokio::fs::metadata(temp_path).await?;
+            let actual_size = metadata.len();
+
+            if actual_size != expected {
+                return Err(anyhow::anyhow!(
+                    "File size mismatch: expected {} bytes, got {} bytes",
+                    Self::pretty_bytes(expected),
+                    Self::pretty_bytes(actual_size)
+                ));
+            }
+
+            info!(
+                "File size verification passed: {} bytes",
+                Self::pretty_bytes(actual_size)
+            );
+        }
+
+        // Note: Checksum verification is handled by the caller
+        debug!("Download streaming complete, file written to: {:?}", temp_path);
+
         Ok(())
+    }
+
+    fn compute_file_checksum(&self, file_path: &PathBuf) -> Result<String> {
+        use std::fs::File;
+        use std::io::Read;
+
+        info!("Computing SHA256 checksum for: {:?}", file_path);
+
+        let mut file = File::open(file_path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 8192];
+
+        loop {
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
+
+        let result = hasher.finalize();
+        let checksum = hex::encode(result);
+
+        info!("Computed SHA256 checksum: {}", checksum);
+
+        Ok(checksum)
+    }
+
+    /// Helper function to format bytes in human-readable format
+    fn pretty_bytes(bytes: u64) -> String {
+        const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
+        let mut size = bytes as f64;
+        let mut unit_index = 0;
+
+        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+            size /= 1024.0;
+            unit_index += 1;
+        }
+
+        format!("{:.2} {}", size, UNITS[unit_index])
     }
 }
 
@@ -364,5 +677,18 @@ mod tests {
 
         assert_eq!(engine.model_url, custom_url);
         assert_eq!(engine.backend, "gpu");
+    }
+
+    #[test]
+    fn test_new_whisper_engine_with_checksum() {
+        let custom_url = "http://custom.com/model.bin".to_string();
+        let checksum = Some("abc123def456".to_string());
+        let engine =
+            WhisperEngine::new_with_checksum(custom_url.clone(), "gpu".to_string(), checksum.clone())
+                .unwrap();
+
+        assert_eq!(engine.model_url, custom_url);
+        assert_eq!(engine.backend, "gpu");
+        assert_eq!(engine.model_checksum, checksum);
     }
 }

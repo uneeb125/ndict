@@ -15,13 +15,12 @@ pub struct StreamingWrapper {
 }
 
 impl StreamingWrapper {
-    pub fn new() -> Self {
-        let sample_rate = 16000;
+    pub fn new(sample_rate: u32) -> Self {
         let window_ms = 3000;
         let overlap_ms = 500;
 
-        let window_samples = (window_ms as usize * sample_rate) / 1000;
-        let overlap_samples = (overlap_ms as usize * sample_rate) / 1000;
+        let window_samples = (window_ms as usize * sample_rate as usize) / 1000;
+        let overlap_samples = (overlap_ms as usize * sample_rate as usize) / 1000;
 
         Self {
             context: None,
@@ -168,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_streaming_wrapper_new() {
-        let wrapper = StreamingWrapper::new();
+        let wrapper = StreamingWrapper::new(16000);
 
         assert_eq!(wrapper.window_samples, 48000);
         assert_eq!(wrapper.overlap_samples, 8000);
@@ -179,7 +178,7 @@ mod tests {
 
     #[test]
     fn test_streaming_wrapper_activate() {
-        let mut wrapper = StreamingWrapper::new();
+        let mut wrapper = StreamingWrapper::new(16000);
 
         wrapper.activate();
 
@@ -190,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_streaming_wrapper_deactivate() {
-        let mut wrapper = StreamingWrapper::new();
+        let mut wrapper = StreamingWrapper::new(16000);
 
         wrapper.activate();
         wrapper.deactivate();
@@ -201,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_streaming_wrapper_process_not_active() {
-        let mut wrapper = StreamingWrapper::new();
+        let mut wrapper = StreamingWrapper::new(16000);
 
         let result = wrapper.process_chunk(&[0.0f32; 512]);
 
@@ -211,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_streaming_wrapper_not_enough_audio() {
-        let mut wrapper = StreamingWrapper::new();
+        let mut wrapper = StreamingWrapper::new(16000);
         wrapper.activate();
 
         let chunk = vec![0.0f32; 100];

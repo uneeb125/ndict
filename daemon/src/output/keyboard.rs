@@ -18,20 +18,23 @@ impl VirtualKeyboard {
         Ok(Self { client })
     }
 
-    pub fn type_text(&mut self, text: &str) -> Result<()> {
+    pub async fn type_text(&mut self, text: &str) -> Result<()> {
         info!("Typing text: '{}'", text);
 
-        // wrtype handles the string parsing and keypress generation internally
-        match self.client.type_text(text) {
-            Ok(_) => {
-                info!("Successfully typed {} characters", text.chars().count());
-                Ok(())
+        // Use block_in_place to allow blocking synchronous code in async context
+        tokio::task::block_in_place(|| {
+            // wrtype handles the string parsing and keypress generation internally
+            match self.client.type_text(text) {
+                Ok(_) => {
+                    info!("Successfully typed {} characters", text.chars().count());
+                    Ok(())
+                }
+                Err(e) => {
+                    // Log the specific error from wrtype
+                    info!("Error: {:?}", e);
+                    Err(anyhow::anyhow!("Failed to type text: {:?}", e))
+                }
             }
-            Err(e) => {
-                // Log the specific error from wrtype
-                info!("Error: {:?}", e);
-                Err(anyhow::anyhow!("Failed to type text: {:?}", e))
-            }
-        }
+        })
     }
 }

@@ -1,6 +1,7 @@
 use crate::audio::capture::AudioCapture;
 use crate::config::Config;
 use crate::output::VirtualKeyboard;
+use crate::rate_limit::CommandRateLimiter;
 use crate::transcription;
 use crate::transcription::engine::WhisperEngine;
 use crate::transcription::streaming_engine::StreamingEngine;
@@ -13,6 +14,7 @@ use tokio::task::JoinHandle;
 
 pub struct DaemonState {
     pub config: Config,
+    pub language: Arc<Mutex<String>>,
     pub is_active: Arc<Mutex<bool>>,
     pub is_processing: Arc<Mutex<bool>>,
     pub audio_capture: Arc<Mutex<Option<AudioCapture>>>,
@@ -22,12 +24,20 @@ pub struct DaemonState {
     pub virtual_keyboard: Arc<Mutex<Option<VirtualKeyboard>>>,
     pub vad_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub streaming_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    pub rate_limiter: Arc<CommandRateLimiter>,
 }
 
 impl DaemonState {
     pub fn new(config: Config) -> Self {
+        let language = config.whisper.language.clone();
+        let rate_limiter = Arc::new(CommandRateLimiter::new(
+            config.rate_limit.commands_per_second,
+            config.rate_limit.burst_capacity,
+            config.rate_limit.enabled,
+        ));
         Self {
             config,
+            language: Arc::new(Mutex::new(language)),
             is_active: Arc::new(Mutex::new(false)),
             is_processing: Arc::new(Mutex::new(false)),
             audio_capture: Arc::new(Mutex::new(None)),
@@ -37,6 +47,7 @@ impl DaemonState {
             virtual_keyboard: Arc::new(Mutex::new(None)),
             vad_task_handle: Arc::new(Mutex::new(None)),
             streaming_task_handle: Arc::new(Mutex::new(None)),
+            rate_limiter,
         }
     }
 
@@ -54,11 +65,16 @@ impl DaemonState {
 
     pub async fn get_status(&self) -> StatusInfo {
         let is_active = *self.is_active.lock().await;
+        let language = self.language.lock().await.clone();
         StatusInfo {
             is_running: true,
             is_active,
-            language: self.config.whisper.language.clone(),
+            language,
         }
+    }
+
+    pub fn get_rate_limiter(&self) -> Arc<CommandRateLimiter> {
+        Arc::clone(&self.rate_limiter)
     }
 
     pub async fn start_vad_processing(&self) -> anyhow::Result<()> {
@@ -71,6 +87,8 @@ impl DaemonState {
             self.audio_rx.lock().await.take();
         let whisper_engine = self.whisper_engine.clone();
         let virtual_keyboard = self.virtual_keyboard.clone();
+        let language = self.language.clone();
+        let config = self.config.clone();
         let vad_threshold_start = self.config.vad.threshold_start;
         let vad_threshold_stop = self.config.vad.threshold_stop;
         let silence_duration_ms = self.config.vad.min_silence_duration_ms;
@@ -116,6 +134,8 @@ impl DaemonState {
 
                             let engine_ref = whisper_engine.clone();
                             let keyboard_ref = virtual_keyboard.clone();
+                            let lang = language.lock().await.clone();
+                            let timeout_config = config.timeouts.clone();
                             tokio::spawn(async move {
                                 tracing::debug!(
                                     "Starting Whisper transcription for {} samples",
@@ -123,11 +143,11 @@ impl DaemonState {
                                 );
 
                                 let transcription_result = tokio::time::timeout(
-                                    tokio::time::Duration::from_secs(30),
+                                    tokio::time::Duration::from_secs(timeout_config.whisper_timeout_seconds),
                                     async {
                                         let mut engine_lock = engine_ref.lock().await;
                                         if let Some(ref mut engine) = *engine_lock {
-                                            engine.transcribe(&speech_audio).await
+                                            engine.transcribe(&speech_audio, &lang).await
                                         } else {
                                             Err(anyhow::anyhow!("Whisper engine not available"))
                                         }
@@ -152,10 +172,10 @@ impl DaemonState {
                                                 post_processed
                                             );
                                             let typing_result = tokio::time::timeout(
-                                                tokio::time::Duration::from_secs(5),
+                                                tokio::time::Duration::from_secs(timeout_config.keyboard_timeout_seconds),
                                                 async {
                                                     let result =
-                                                        keyboard.type_text(&post_processed);
+                                                        keyboard.type_text(&post_processed).await;
                                                     Ok::<_, anyhow::Error>(result)
                                                 },
                                             )
@@ -171,7 +191,8 @@ impl DaemonState {
                                                 }
                                                 Err(_) => {
                                                     tracing::error!(
-                                                        "Keyboard typing operation timed out after 5 seconds"
+                                                        "Keyboard typing operation timed out after {} seconds",
+                                                        timeout_config.keyboard_timeout_seconds
                                                     );
                                                 }
                                             }
@@ -185,7 +206,8 @@ impl DaemonState {
                                     }
                                     Err(_) => {
                                         tracing::error!(
-                                            "Whisper transcription operation timed out after 30 seconds"
+                                            "Whisper transcription operation timed out after {} seconds",
+                                            timeout_config.whisper_timeout_seconds
                                         );
                                     }
                                 }
@@ -219,6 +241,7 @@ impl DaemonState {
             self.audio_rx.lock().await.take();
         let streaming_engine = self.streaming_engine.clone();
         let virtual_keyboard = self.virtual_keyboard.clone();
+        let config = self.config.clone();
 
         if audio_rx_option.is_none() {
             return Err(anyhow::anyhow!("Audio receiver not available"));
@@ -240,28 +263,54 @@ impl DaemonState {
                         let mut engine_lock = streaming_engine.lock().await;
                         if let Some(ref mut engine) = *engine_lock {
                             match engine.send_audio(&samples) {
-                                Ok(Some(text)) => {
-                                    tracing::info!("Streaming transcription: '{}'", text);
+                            Ok(Some(text)) => {
+                                tracing::info!("Streaming transcription: '{}'", text);
 
-                                    let post_processed =
-                                        transcription::post_process_transcription(&text);
+                                let post_processed =
+                                    transcription::post_process_transcription(&text);
 
-                                    let mut keyboard_lock = virtual_keyboard.lock().await;
-                                    if let Some(ref mut keyboard) = *keyboard_lock {
-                                        if let Err(e) = keyboard.type_text(&post_processed) {
+                                let mut keyboard_lock = virtual_keyboard.lock().await;
+                                if let Some(ref mut keyboard) = *keyboard_lock {
+                                    tracing::debug!(
+                                        "Starting keyboard typing for: '{}'",
+                                        post_processed
+                                    );
+                                    let typing_result = tokio::time::timeout(
+                                        tokio::time::Duration::from_secs(config.timeouts.keyboard_timeout_seconds),
+                                        async {
+                                            let result =
+                                                keyboard.type_text(&post_processed).await;
+                                            Ok::<_, anyhow::Error>(result)
+                                        },
+                                    )
+                                    .await;
+
+                                    match typing_result {
+                                        Ok(Ok(_)) => {
+                                            tracing::info!("Successfully typed text");
+                                            tracing::debug!("Finished keyboard typing");
+                                        }
+                                        Ok(Err(e)) => {
                                             tracing::error!("Keyboard typing error: {}", e);
+                                        }
+                                        Err(_) => {
+                                            tracing::error!(
+                                                "Keyboard typing operation timed out after {} seconds",
+                                                config.timeouts.keyboard_timeout_seconds
+                                            );
                                         }
                                     }
                                 }
-                                Ok(None) => {}
-                                Err(e) => {
-                                    tracing::error!(
-                                        "Failed to send audio to streaming engine: {}",
-                                        e
-                                    );
-                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to send audio to streaming engine: {}",
+                                    e
+                                );
                             }
                         }
+                    }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("Streaming lagged, dropped {} audio chunks", n);
@@ -354,6 +403,17 @@ mod tests {
         assert_eq!(status.is_running, true);
         assert_eq!(status.is_active, false);
         assert_eq!(status.language, config.whisper.language);
+        assert_eq!(status.language, state.language.lock().await.as_str());
+    }
+
+    #[tokio::test]
+    async fn test_get_status_language_from_config() {
+        let config = Config::default();
+        let state = DaemonState::new(config.clone());
+
+        // Language should be initialized from config
+        let lang = state.language.lock().await;
+        assert_eq!(lang.as_str(), config.whisper.language);
     }
 
     #[tokio::test]
@@ -367,7 +427,7 @@ mod tests {
 
         assert_eq!(status.is_running, true);
         assert_eq!(status.is_active, true);
-        assert_eq!(status.language, config.whisper.language);
+        assert_eq!(status.language, state.language.lock().await.as_str());
     }
 
     #[tokio::test]

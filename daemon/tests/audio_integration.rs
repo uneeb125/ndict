@@ -40,7 +40,7 @@ mod tests {
 
         let (tx, mut rx) = broadcast::channel(100);
         let mut capture =
-            AudioCapture::new().expect("Failed to create audio capture. Check permissions.");
+            AudioCapture::new(16000).expect("Failed to create audio capture. Check permissions.");
 
         capture.start(tx).expect("Failed to start audio capture");
 
@@ -107,7 +107,7 @@ mod tests {
         print_info("Please speak clearly now.");
 
         let (tx, mut rx) = broadcast::channel(100);
-        let mut capture = AudioCapture::new().expect("Failed to create audio capture");
+        let mut capture = AudioCapture::new(16000).expect("Failed to create audio capture");
 
         capture.start(tx).expect("Failed to start capture");
 
@@ -157,7 +157,7 @@ mod tests {
         print_info("Capturing for 5 seconds...");
 
         let (tx, mut rx) = broadcast::channel(100);
-        let mut capture = AudioCapture::new().expect("Failed to create capture");
+        let mut capture = AudioCapture::new(16000).expect("Failed to create capture");
 
         capture.start(tx).expect("Failed to start capture");
 

@@ -2,7 +2,8 @@ pub mod engine;
 pub mod streaming_engine;
 
 pub fn post_process_transcription(text: &str) -> String {
-    let mut text = text.trim().to_string();
+    let original = text.trim().to_string();
+    let mut text = original.clone();
 
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut deduped_words = Vec::new();
@@ -26,7 +27,7 @@ pub fn post_process_transcription(text: &str) -> String {
     let re_final = regex::Regex::new(r"\s+").unwrap();
     text = re_final.replace_all(&text, " ").trim().to_string();
 
-    tracing::debug!("Post-processed: '{}' -> '{}'", text, text);
+    tracing::debug!("Post-processed: '{}' -> '{}'", original, text);
 
     text
 }

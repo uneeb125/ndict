@@ -1,9 +1,22 @@
-use shared::ipc::{Command, IpcError, Response};
-use std::path::PathBuf;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixStream;
+ use shared::ipc::{Command, IpcError, Response};
+ use std::path::PathBuf;
+ use tokio::io::{AsyncReadExt, AsyncWriteExt};
+ use tokio::net::UnixStream;
+ use tokio::time::{timeout, Duration};
+ use tracing::warn;
 
-const SOCKET_PATH: &str = "/tmp/ndictd.sock";
+ /// Timeout for socket operations (5 seconds)
+ const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
+
+ /// Get the Unix socket path for the daemon.
+ /// Uses XDG runtime directory if available, falls back to /tmp/ndictd.sock
+ fn get_socket_path() -> PathBuf {
+     if let Some(runtime_dir) = dirs::runtime_dir() {
+         runtime_dir.join("ndictd.sock")
+     } else {
+         PathBuf::from("/tmp/ndictd.sock")
+     }
+ }
 
 pub struct DaemonClient {
     socket_path: PathBuf,
@@ -12,27 +25,46 @@ pub struct DaemonClient {
 impl DaemonClient {
     pub fn new() -> Self {
         Self {
-            socket_path: PathBuf::from(SOCKET_PATH),
+            socket_path: get_socket_path(),
         }
     }
 
     pub async fn send_command(&self, cmd: Command) -> Result<Response, IpcError> {
-        let mut stream = match UnixStream::connect(&self.socket_path).await {
-            Ok(stream) => stream,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        // Connect with timeout
+        let mut stream = match timeout(SOCKET_TIMEOUT, UnixStream::connect(&self.socket_path)).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(IpcError::ConnectionRefused);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
                 return Err(IpcError::ConnectionRefused);
             }
-            Err(e) => return Err(e.into()),
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => {
+                warn!("Connection timeout: failed to connect to daemon at {} within {:?}", self.socket_path.display(), SOCKET_TIMEOUT);
+                return Err(IpcError::Timeout);
+            }
         };
 
+        // Serialize command
         let command_json = serde_json::to_vec(&cmd)?;
-        stream.write_all(&command_json).await?;
 
+        // Write with timeout
+        if timeout(SOCKET_TIMEOUT, stream.write_all(&command_json)).await.is_err() {
+            warn!("Write timeout: failed to send command to daemon within {:?}", SOCKET_TIMEOUT);
+            return Err(IpcError::Timeout);
+        }
+
+        // Read with timeout
         let mut buffer = vec![0u8; 1024];
-        let n = stream.read(&mut buffer).await?;
+        let n = match timeout(SOCKET_TIMEOUT, stream.read(&mut buffer)).await {
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => {
+                warn!("Read timeout: failed to receive response from daemon within {:?}", SOCKET_TIMEOUT);
+                return Err(IpcError::Timeout);
+            }
+        };
 
         buffer.truncate(n);
 
@@ -51,7 +83,13 @@ mod tests {
     #[tokio::test]
     async fn test_daemon_client_new() {
         let client = DaemonClient::new();
-        assert_eq!(client.socket_path, PathBuf::from("/tmp/ndictd.sock"));
+        // The socket path should use XDG runtime dir if available, or fallback to /tmp
+        if dirs::runtime_dir().is_some() {
+            let expected = dirs::runtime_dir().unwrap().join("ndictd.sock");
+            assert_eq!(client.socket_path, expected);
+        } else {
+            assert_eq!(client.socket_path, PathBuf::from("/tmp/ndictd.sock"));
+        }
     }
 
     #[tokio::test]
@@ -200,5 +238,66 @@ mod tests {
             let parsed: Command = serde_json::from_slice(&json).unwrap();
             assert_eq!(cmd, parsed);
         }
+    }
+
+    #[tokio::test]
+    async fn test_send_command_timeout_on_write() {
+        let test_socket = "/tmp/test_ndict_timeout_write.sock";
+
+        // Clean up any existing socket file
+        std::fs::remove_file(test_socket).ok();
+
+        let listener = UnixListener::bind(test_socket).unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+
+            let mut buffer = vec![0u8; 1024];
+            let _n = stream.read(&mut buffer).await.unwrap();
+
+            // Don't write response - cause timeout on client read
+            tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let client = DaemonClient {
+            socket_path: PathBuf::from(test_socket),
+        };
+
+        let result = client.send_command(Command::Start).await;
+        assert!(matches!(result, Err(IpcError::Timeout)));
+
+        std::fs::remove_file(test_socket).ok();
+    }
+
+    #[tokio::test]
+    async fn test_send_command_timeout_on_read() {
+        let test_socket = "/tmp/test_ndict_timeout_read.sock";
+
+        // Clean up any existing socket file
+        std::fs::remove_file(test_socket).ok();
+
+        let listener = UnixListener::bind(test_socket).unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+
+            let mut buffer = vec![0u8; 1024];
+            let _n = stream.read(&mut buffer).await.unwrap();
+
+            // Don't send response - client will timeout waiting for response
+            // The timeout is 5 seconds, so sleep longer than that
+            tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let client = DaemonClient {
+            socket_path: PathBuf::from(test_socket),
+        };
+
+        let result = client.send_command(Command::Start).await;
+        assert!(matches!(result, Err(IpcError::Timeout)));
+
+        std::fs::remove_file(test_socket).ok();
     }
 }

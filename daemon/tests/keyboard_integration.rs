@@ -36,7 +36,7 @@ mod tests {
 
         wait_for_user("Press Enter to type the message...");
 
-        let result = keyboard.type_text(test_text);
+        let result = keyboard.type_text(test_text).await;
 
         match result {
             Ok(_) => {
@@ -74,7 +74,7 @@ mod tests {
 
         wait_for_user("Press Enter to type special characters...");
 
-        let result = keyboard.type_text(test_text);
+        let result = keyboard.type_text(test_text).await;
 
         match result {
             Ok(_) => {
@@ -109,7 +109,7 @@ mod tests {
 
         wait_for_user("Press Enter to type Unicode characters...");
 
-        let result = keyboard.type_text(test_text);
+        let result = keyboard.type_text(test_text).await;
 
         match result {
             Ok(_) => {
@@ -147,7 +147,7 @@ mod tests {
         wait_for_user("Press Enter to start typing...");
 
         let start = std::time::Instant::now();
-        let result = keyboard.type_text(test_text);
+        let result = keyboard.type_text(test_text).await;
         let elapsed = start.elapsed();
 
         match result {
@@ -191,7 +191,7 @@ mod tests {
 
         print_info("Typing empty string...");
 
-        let result = keyboard.type_text(test_text);
+        let result = keyboard.type_text(test_text).await;
 
         match result {
             Ok(_) => {
@@ -225,55 +225,38 @@ mod tests {
 
         wait_for_user("Press Enter to start typing...");
 
-        let timeout = std::time::Duration::from_secs(5);
+        print_info(&format!("Typing {} characters with 5 second timeout...", test_text.len()));
+
         let start = std::time::Instant::now();
 
-        let typing_thread = std::thread::spawn(move || {
-            let mut keyboard = VirtualKeyboard::new().expect("Failed to create keyboard");
-            keyboard.type_text(&test_text)
-        });
-
-        let result = typing_thread
-            .join()
-            .unwrap_or(Err(anyhow::anyhow!("Thread panicked")));
+        let typing_result = tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            keyboard.type_text(&test_text),
+        )
+        .await;
 
         let elapsed = start.elapsed();
-        if elapsed > timeout {
-            print_error(&format!("Timeout exceeded: {:.2}s", elapsed.as_secs_f64()));
-            panic!("Test failed: Typing exceeded 5 second timeout");
-        }
 
-        match result {
-            Ok(_) => {
+        match typing_result {
+            Ok(Ok(_)) => {
                 print_success(&format!(
                     "Very long text test completed in {:.2}s",
                     elapsed.as_secs_f64()
                 ));
                 print_info("Check if text appeared in your window.");
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 print_error(&format!("Failed to type very long text: {}", e));
                 print_info("This may indicate:");
-                print_info("  - Timeout exceeded (text too long for 5s)");
                 print_info("  - Application limitations");
+                print_info("  - Wayland connection issues");
                 panic!("Test failed: {}", e);
             }
-        }
-
-        match result {
-            Ok(_) => {
-                print_success(&format!(
-                    "Very long text test completed in {:.2}s",
-                    elapsed.as_secs_f64()
-                ));
-                print_info("Check if text appeared in your window.");
-            }
-            Err(e) => {
-                print_error(&format!("Failed to type very long text: {}", e));
-                print_info("This may indicate:");
-                print_info("  - Timeout exceeded (text too long for 5s)");
-                print_info("  - Application limitations");
-                panic!("Test failed: {}", e);
+            Err(_) => {
+                print_error(&format!("Timeout exceeded: {:.2}s", elapsed.as_secs_f64()));
+                print_info("This is expected for very long text (500 characters)");
+                print_info("The 5-second timeout is working as designed.");
+                panic!("Test failed: Typing exceeded 5 second timeout");
             }
         }
     }

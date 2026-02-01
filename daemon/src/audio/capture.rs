@@ -1,40 +1,46 @@
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::broadcast;
-
-const SAMPLE_RATE: u32 = 16000;
-const CHANNELS: u16 = 1;
 
 pub struct AudioCapture {
     device: Option<Device>,
     stream: Option<Box<Stream>>,
-    audio_tx: Arc<Mutex<Option<broadcast::Sender<Vec<f32>>>>>,
-    is_running: Arc<Mutex<bool>>,
+    audio_tx: Option<Arc<broadcast::Sender<Vec<f32>>>>,
+    is_running: Arc<AtomicBool>,
+    sample_rate: u32,
+    channels: u16,
 }
 
 impl AudioCapture {
-    pub fn new() -> Result<Self> {
+    pub fn new(sample_rate: u32) -> Result<Self> {
+        Self::new_with_channels(sample_rate, 1)
+    }
+
+    pub fn new_with_channels(sample_rate: u32, channels: u16) -> Result<Self> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
             .ok_or_else(|| anyhow::anyhow!("No default input device found"))?;
 
-        tracing::info!("Audio capture initialized");
+        tracing::info!("Audio capture initialized with sample rate: {}Hz, channels: {}", sample_rate, channels);
         tracing::info!("Using input device: {}", device.name()?);
 
         Ok(Self {
             device: Some(device),
             stream: None,
-            audio_tx: Arc::new(Mutex::new(None)),
-            is_running: Arc::new(Mutex::new(false)),
+            audio_tx: None,
+            is_running: Arc::new(AtomicBool::new(false)),
+            sample_rate,
+            channels,
         })
     }
 
     pub fn start(&mut self, audio_tx: broadcast::Sender<Vec<f32>>) -> Result<()> {
-        *self.audio_tx.lock().unwrap() = Some(audio_tx);
-        *self.is_running.lock().unwrap() = true;
+        self.audio_tx = Some(Arc::new(audio_tx));
+        self.is_running.store(true, Ordering::Release);
 
         let device = self
             .device
@@ -43,8 +49,8 @@ impl AudioCapture {
 
         tracing::info!(
             "Configuring audio stream: {}Hz, {} channel(s)",
-            SAMPLE_RATE,
-            CHANNELS
+            self.sample_rate,
+            self.channels
         );
 
         let supported_configs = device.supported_input_configs()?;
@@ -52,13 +58,13 @@ impl AudioCapture {
 
         for supported in supported_configs {
             tracing::debug!("Supported config: {:?}", supported);
-            if supported.channels() == CHANNELS
-                && supported.min_sample_rate().0 <= SAMPLE_RATE
-                && supported.max_sample_rate().0 >= SAMPLE_RATE
+            if supported.channels() == self.channels
+                && supported.min_sample_rate().0 <= self.sample_rate
+                && supported.max_sample_rate().0 >= self.sample_rate
             {
                 config = Some(
                     supported
-                        .with_sample_rate(cpal::SampleRate(SAMPLE_RATE))
+                        .with_sample_rate(cpal::SampleRate(self.sample_rate))
                         .into(),
                 );
                 break;
@@ -68,7 +74,7 @@ impl AudioCapture {
         let final_config =
             config.ok_or_else(|| anyhow::anyhow!("No suitable audio configuration found"))?;
 
-        let audio_tx = Arc::clone(&self.audio_tx);
+        let audio_tx = self.audio_tx.as_ref().map(Arc::clone);
         let is_running = Arc::clone(&self.is_running);
 
         let error_callback = |err| {
@@ -85,7 +91,7 @@ impl AudioCapture {
                 let stream = device.build_input_stream(
                     &final_config,
                     move |data: &[f32], _: &_| {
-                        Self::process_audio_chunk(data, &audio_tx, &is_running);
+                        Self::process_audio_chunk(data, audio_tx.as_deref(), &is_running);
                     },
                     error_callback,
                     None,
@@ -98,7 +104,7 @@ impl AudioCapture {
                     move |data: &[i16], _: &_| {
                         let converted: Vec<f32> =
                             data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                        Self::process_audio_chunk(&converted, &audio_tx, &is_running);
+                        Self::process_audio_chunk(&converted, audio_tx.as_deref(), &is_running);
                     },
                     error_callback,
                     None,
@@ -113,7 +119,7 @@ impl AudioCapture {
                             .iter()
                             .map(|&s| (s as i16 as f32) / i16::MAX as f32)
                             .collect();
-                        Self::process_audio_chunk(&converted, &audio_tx, &is_running);
+                        Self::process_audio_chunk(&converted, audio_tx.as_deref(), &is_running);
                     },
                     error_callback,
                     None,
@@ -134,24 +140,22 @@ impl AudioCapture {
 
     fn process_audio_chunk(
         data: &[f32],
-        audio_tx: &Arc<Mutex<Option<broadcast::Sender<Vec<f32>>>>>,
-        is_running: &Arc<Mutex<bool>>,
+        audio_tx: Option<&broadcast::Sender<Vec<f32>>>,
+        is_running: &Arc<AtomicBool>,
     ) {
-        if is_running.try_lock().map(|g| *g).unwrap_or(false) {
-            if let Ok(tx) = audio_tx.try_lock() {
-                if let Some(sender) = tx.as_ref() {
-                    let _ = sender.send(data.to_vec());
-                }
+        if is_running.load(Ordering::Acquire) {
+            if let Some(sender) = audio_tx {
+                let _ = sender.send(data.to_vec());
             }
         }
     }
 
     pub async fn stop(&mut self) -> anyhow::Result<()> {
-        *self.is_running.lock().unwrap() = false;
+        self.is_running.store(false, Ordering::Release);
         if let Some(stream) = self.stream.take() {
             drop(stream);
         }
-        *self.audio_tx.lock().unwrap() = None;
+        self.audio_tx = None;
 
         tracing::info!("Audio capture stopped");
         Ok(())

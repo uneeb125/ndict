@@ -13,19 +13,20 @@ pub struct StreamingEngine {
     keep_samples: usize,
     last_text: String,
     is_running: bool,
+    language: String,
 }
 
 impl StreamingEngine {
     pub fn new(
         _model_path: String,
-        _language: String,
+        language: String,
         _step_ms: u32,
         length_ms: u32,
         keep_ms: u32,
+        sample_rate: u32,
     ) -> Self {
-        let sample_rate = 16000;
-        let length_samples = (length_ms as usize * sample_rate) / 1000;
-        let keep_samples = (keep_ms as usize * sample_rate) / 1000;
+        let length_samples = (length_ms as usize * sample_rate as usize) / 1000;
+        let keep_samples = (keep_ms as usize * sample_rate as usize) / 1000;
 
         Self {
             context: None,
@@ -36,6 +37,7 @@ impl StreamingEngine {
             keep_samples,
             last_text: String::new(),
             is_running: false,
+            language,
         }
     }
 
@@ -105,6 +107,11 @@ impl StreamingEngine {
         self.last_text.clear();
     }
 
+    pub fn set_language(&mut self, language: String) {
+        self.language = language;
+        info!("Streaming engine language updated to: {}", self.language);
+    }
+
     fn process_window(&mut self) -> Result<Option<String>> {
         let state = self
             .state
@@ -118,7 +125,7 @@ impl StreamingEngine {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        params.set_language(Some("en"));
+        params.set_language(Some(&self.language));
         params.set_single_segment(true);
 
         state
@@ -160,6 +167,7 @@ mod tests {
             3000,
             10000,
             500,
+            16000,
         );
 
         assert_eq!(engine.length_samples, 160000);
@@ -170,7 +178,7 @@ mod tests {
     #[test]
     fn test_streaming_engine_custom_params() {
         let engine =
-            StreamingEngine::new("custom.bin".to_string(), "es".to_string(), 1500, 5000, 500);
+            StreamingEngine::new("custom.bin".to_string(), "es".to_string(), 1500, 5000, 500, 16000);
 
         assert_eq!(engine.length_samples, 80000);
         assert_eq!(engine.keep_samples, 8000);
@@ -179,10 +187,24 @@ mod tests {
     #[test]
     fn test_streaming_engine_not_running() {
         let mut engine =
-            StreamingEngine::new("test.bin".to_string(), "en".to_string(), 3000, 10000, 200);
+            StreamingEngine::new("test.bin".to_string(), "en".to_string(), 3000, 10000, 200, 16000);
 
         let result = engine.send_audio(&[0.0f32; 512]);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_streaming_engine_set_language() {
+        let mut engine =
+            StreamingEngine::new("test.bin".to_string(), "en".to_string(), 3000, 10000, 200, 16000);
+
+        assert_eq!(engine.language, "en");
+
+        engine.set_language("es".to_string());
+        assert_eq!(engine.language, "es");
+
+        engine.set_language("fr".to_string());
+        assert_eq!(engine.language, "fr");
     }
 }
