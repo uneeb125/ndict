@@ -32,14 +32,14 @@ install: release
     chmod +x ~/.local/bin/ndictd ~/.local/bin/ndict
     @echo "Binaries installed to ~/.local/bin/"
 
-install-waybar: install
+install-waybar:
     @mkdir -p ~/.local/bin
     cp waybar/ndict-waybar ~/.local/bin/ndict-waybar
     cp waybar/ndict-ironbar ~/.local/bin/ndict-ironbar
     chmod +x ~/.local/bin/ndict-waybar ~/.local/bin/ndict-ironbar
     @echo "Waybar/Ironbar scripts installed to ~/.local/bin/"
 
-install-systemd: install
+install-systemd:
     @if [ ! -f systemd/ndictd.service ]; then echo "Error: systemd service file not found"; exit 1; fi
     cp systemd/ndictd.service ~/.config/systemd/user/ndict.service
     systemctl --user daemon-reload
@@ -47,7 +47,7 @@ install-systemd: install
     systemctl --user start ndict.service
     @if systemctl --user is-active --quiet ndict.service; then echo "Daemon started successfully"; else echo "Daemon failed to start"; exit 1; fi
 
-install-all: install-waybar install-systemd
+install-all: install install-waybar install-systemd
     @just _print-waybar-config
     @just _print-waybar-css
 

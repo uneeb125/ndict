@@ -4,19 +4,19 @@ STATE_FILE="/tmp/ndict.state"
 
 case "$1" in
     start)
-        $HOME/.local/bin/ndict mstart
+        $HOME/.local/bin/ndict m-start
         ;;
     complete)
-        $HOME/.local/bin/ndict mcomplete
+        $HOME/.local/bin/ndict m-complete
         ;;
     stop)
         $HOME/.local/bin/ndict mstop
         ;;
     toggle)
         if [ -f "$STATE_FILE" ]; then
-            $HOME/.local/bin/ndict mstop
+            $HOME/.local/bin/ndict m-stop
         else
-            $HOME/.local/bin/ndict mstart
+            $HOME/.local/bin/ndict m-start
         fi
         ;;
 esac
