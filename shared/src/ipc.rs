@@ -10,6 +10,9 @@ pub enum Command {
     Status,
     SetLanguage(String),
     Toggle,
+    MStart,
+    MComplete,
+    MStop,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -70,6 +73,9 @@ mod tests {
             Command::Status,
             Command::SetLanguage("test".to_string()),
             Command::Toggle,
+            Command::MStart,
+            Command::MComplete,
+            Command::MStop,
         ];
         for cmd in commands {
             let json = serde_json::to_string(&cmd).unwrap();

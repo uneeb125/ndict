@@ -6,6 +6,7 @@
 DAEMON_NAME="ndictd"
 CLI_NAME="ndict"
 WAYBAR_SCRIPT_NAME="ndict-waybar"
+IRONBAR_SCRIPT_NAME="ndict-ironbar"
 SERVICE_NAME="ndict.service"
 
 # Source Directory (Rust release folder)
@@ -92,6 +93,77 @@ fi
 EOF
 
 chmod +x "$DEST_BIN_DIR/$WAYBAR_SCRIPT_NAME"
+
+
+# This script manages the state file to track if we are recording or not
+cat > "$DEST_BIN_DIR/$IRONBAR_SCRIPT_NAME" <<EOF
+#!/bin/bash
+
+# --- 1. Configuration (Defined at the top!) ---
+STATE_FILE="/tmp/ndict.state"
+PIPE_FILE="/tmp/ndict.pipe"
+
+# Tokyo Night Colors
+COLOR_REC="#f7768e"  # Red
+COLOR_IDLE="#7aa2f7" # Blue
+
+# --- 2. Helper Function: Get Status String ---
+get_status_string() {
+    if [ -f "$STATE_FILE" ]; then
+        echo "<span foreground='$COLOR_REC' weight='bold'> Listening...</span>"
+    else
+        echo "<span foreground='$COLOR_IDLE' weight='bold'> Idle</span>"
+    fi
+}
+
+# --- 3. Logic Handler ---
+case "$1" in
+    toggle)
+        # --- TOGGLE MODE (Runs on Click) ---
+        
+        # 1. Toggle the state file and run the actual logic
+        if [ -f "$STATE_FILE" ]; then
+            $HOME/.local/bin/ndict stop
+            rm -f "$STATE_FILE"
+        else
+            $HOME/.local/bin/ndict start
+            touch "$STATE_FILE"
+        fi
+
+        # 2. Push update to Ironbar via the Pipe
+        # We verify the pipe exists to avoid hanging if Ironbar isn't running
+        if [ -p "$PIPE_FILE" ]; then
+            get_status_string > "$PIPE_FILE" &
+        fi
+        exit 0
+        ;;
+    
+    *)
+        # --- WATCH MODE (Runs on Ironbar Startup) ---
+        
+        # 1. Ensure the Named Pipe exists
+        # Clean up old pipe if it's not a pipe file (e.g. stale normal file)
+        if [ -e "$PIPE_FILE" ] && [ ! -p "$PIPE_FILE" ]; then
+            rm -f "$PIPE_FILE"
+        fi
+        
+        # Create the pipe if missing
+        if [ ! -p "$PIPE_FILE" ]; then
+            mkfifo "$PIPE_FILE"
+        fi
+
+        # 2. Output the initial state immediately (so bar isn't empty)
+        get_status_string
+
+        # 3. Block forever, listening to the pipe
+        # "tail -f" keeps the script running. Ironbar reads standard output.
+        tail -f "$PIPE_FILE"
+        ;;
+esac
+EOF
+
+chmod +x "$DEST_BIN_DIR/$IRONBAR_SCRIPT_NAME"
+
 
 # ==========================================
 # CONFIG INSTALLATION

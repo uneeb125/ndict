@@ -17,6 +17,8 @@ pub struct DaemonState {
     pub language: Arc<Mutex<String>>,
     pub is_active: Arc<Mutex<bool>>,
     pub is_processing: Arc<Mutex<bool>>,
+    pub is_manual_mode: Arc<Mutex<bool>>,
+    pub manual_speech_buffer: Arc<Mutex<Vec<f32>>>,
     pub audio_capture: Arc<Mutex<Option<AudioCapture>>>,
     pub audio_rx: Arc<Mutex<Option<broadcast::Receiver<Vec<f32>>>>>,
     pub whisper_engine: Arc<Mutex<Option<WhisperEngine>>>,
@@ -40,6 +42,8 @@ impl DaemonState {
             language: Arc::new(Mutex::new(language)),
             is_active: Arc::new(Mutex::new(false)),
             is_processing: Arc::new(Mutex::new(false)),
+            is_manual_mode: Arc::new(Mutex::new(false)),
+            manual_speech_buffer: Arc::new(Mutex::new(Vec::new())),
             audio_capture: Arc::new(Mutex::new(None)),
             audio_rx: Arc::new(Mutex::new(None)),
             whisper_engine: Arc::new(Mutex::new(None)),
@@ -346,6 +350,174 @@ impl DaemonState {
             handle.abort();
             tracing::info!("Streaming task stopped");
         }
+    }
+
+    pub async fn start_manual_mode(&self) -> anyhow::Result<()> {
+        let is_manual = *self.is_manual_mode.lock().await;
+        if is_manual {
+            return Err(anyhow::anyhow!("Already in manual mode"));
+        }
+
+        let is_processing = *self.is_processing.lock().await;
+        if is_processing {
+            return Err(anyhow::anyhow!("Already processing audio"));
+        }
+
+        let audio_rx_option: Option<broadcast::Receiver<Vec<f32>>> =
+            self.audio_rx.lock().await.take();
+        let vad_threshold_start = self.config.vad.threshold_start;
+        let vad_threshold_stop = self.config.vad.threshold_stop;
+        let silence_duration_ms = self.config.vad.min_silence_duration_ms;
+        let gain = self.config.audio.gain;
+        let manual_buffer = self.manual_speech_buffer.clone();
+        let is_manual_mode = self.is_manual_mode.clone();
+
+        if audio_rx_option.is_none() {
+            return Err(anyhow::anyhow!("Audio receiver not available"));
+        }
+
+        let mut audio_rx = audio_rx_option.unwrap();
+        let is_processing_flag = self.is_processing.clone();
+
+        let vad_task = tokio::spawn(async move {
+            *is_processing_flag.lock().await = true;
+            *is_manual_mode.lock().await = true;
+
+            tracing::info!("Manual mode VAD task started");
+
+            let mut speech_detector = SpeechDetector::new(
+                vad_threshold_start,
+                vad_threshold_stop,
+                silence_duration_ms,
+                gain,
+            )
+            .unwrap();
+
+            loop {
+                match audio_rx.recv().await {
+                    Ok(samples) => {
+                        let vad_result = speech_detector.process_audio(&samples);
+                        if let Some(speech_audio) = vad_result {
+                            tracing::info!(
+                                "Manual mode: speech segment detected, buffering: {} samples",
+                                speech_audio.len()
+                            );
+                            let mut buffer = manual_buffer.lock().await;
+                            buffer.extend_from_slice(&speech_audio);
+                            tracing::debug!("Manual buffer total: {} samples", buffer.len());
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("Manual VAD lagged, dropped {} audio chunks", n);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        tracing::info!("Audio receiver closed, stopping manual VAD processing");
+                        break;
+                    }
+                }
+            }
+
+            *is_processing_flag.lock().await = false;
+            *is_manual_mode.lock().await = false;
+        });
+
+        *self.vad_task_handle.lock().await = Some(vad_task);
+        Ok(())
+    }
+
+    pub async fn complete_manual_mode(&self) -> anyhow::Result<()> {
+        let is_manual = *self.is_manual_mode.lock().await;
+        if !is_manual {
+            return Err(anyhow::anyhow!("Not in manual mode"));
+        }
+
+        let buffer = {
+            let mut buf = self.manual_speech_buffer.lock().await;
+            if buf.is_empty() {
+                return Err(anyhow::anyhow!("No speech buffered"));
+            }
+            std::mem::take(&mut *buf)
+        };
+
+        tracing::info!(
+            "Manual complete: transcribing {} samples",
+            buffer.len()
+        );
+
+        let whisper_engine = self.whisper_engine.clone();
+        let virtual_keyboard = self.virtual_keyboard.clone();
+        let language = self.language.lock().await.clone();
+        let timeout_config = self.config.timeouts.clone();
+
+        tokio::spawn(async move {
+            let transcription_result = tokio::time::timeout(
+                tokio::time::Duration::from_secs(timeout_config.whisper_timeout_seconds),
+                async {
+                    let mut engine_lock = whisper_engine.lock().await;
+                    if let Some(ref mut engine) = *engine_lock {
+                        engine.transcribe(&buffer, &language).await
+                    } else {
+                        Err(anyhow::anyhow!("Whisper engine not available"))
+                    }
+                },
+            )
+            .await;
+
+            match transcription_result {
+                Ok(Ok(text)) => {
+                    tracing::debug!("Manual mode transcription complete");
+                    let post_processed = transcription::post_process_transcription(&text);
+                    tracing::info!("Manual transcription result: '{}'", post_processed);
+
+                    let mut keyboard_lock = virtual_keyboard.lock().await;
+                    if let Some(ref mut keyboard) = *keyboard_lock {
+                        let typing_result = tokio::time::timeout(
+                            tokio::time::Duration::from_secs(timeout_config.keyboard_timeout_seconds),
+                            async {
+                                keyboard.type_text(&post_processed).await
+                            },
+                        )
+                        .await;
+
+                        match typing_result {
+                            Ok(Ok(_)) => {
+                                tracing::info!("Manual mode: successfully typed text");
+                            }
+                            Ok(Err(e)) => {
+                                tracing::error!("Manual mode: keyboard typing error: {}", e);
+                            }
+                            Err(_) => {
+                                tracing::error!(
+                                    "Manual mode: keyboard typing timed out after {} seconds",
+                                    timeout_config.keyboard_timeout_seconds
+                                );
+                            }
+                        }
+                    } else {
+                        tracing::warn!("Manual mode: virtual keyboard not available");
+                    }
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("Manual mode: transcription error: {}", e);
+                }
+                Err(_) => {
+                    tracing::error!(
+                        "Manual mode: transcription timed out after {} seconds",
+                        timeout_config.whisper_timeout_seconds
+                    );
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    pub async fn stop_manual_mode(&self) {
+        *self.is_manual_mode.lock().await = false;
+        self.stop_vad_processing().await;
+        let mut buffer = self.manual_speech_buffer.lock().await;
+        buffer.clear();
+        tracing::info!("Manual mode stopped, buffer cleared");
     }
 }
 

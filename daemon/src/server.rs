@@ -247,6 +247,79 @@ impl DaemonServer {
         Ok(Response::Ok)
     }
 
+    /// Helper for manual mode start.
+    /// Loads engines, starts audio capture, begins buffering speech segments.
+    async fn handle_mstart(state: Arc<Mutex<DaemonState>>) -> anyhow::Result<Response> {
+        let mut state_guard = state.lock().await;
+        state_guard.activate().await?;
+
+        if *state_guard.is_processing.lock().await {
+            return Err(anyhow::anyhow!("Already processing audio"));
+        }
+
+        if state_guard.whisper_engine.lock().await.is_none() {
+            let mut whisper_engine = WhisperEngine::new_with_checksum_and_params(
+                state_guard.config.whisper.model_url.clone(),
+                state_guard.config.whisper.backend.clone(),
+                state_guard.config.whisper.model_checksum.clone(),
+                state_guard.config.whisper.min_audio_samples,
+                state_guard.config.whisper.sampling_strategy.clone(),
+            )?;
+            whisper_engine.load_model().await?;
+            *state_guard.whisper_engine.lock().await = Some(whisper_engine);
+            info!("Whisper engine loaded for manual mode");
+        }
+
+        if state_guard.virtual_keyboard.lock().await.is_none() {
+            let virtual_keyboard = VirtualKeyboard::new()?;
+            *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+        }
+
+        let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(state_guard.config.buffer.broadcast_capacity);
+        let sample_rate = state_guard.config.audio.sample_rate;
+        let channels = state_guard.config.audio.channels;
+        let mut new_capture = AudioCapture::new_with_channels(sample_rate, channels)?;
+        new_capture.start(audio_tx)?;
+        *state_guard.audio_capture.lock().await = Some(new_capture);
+        *state_guard.audio_rx.lock().await = Some(audio_rx);
+
+        debug!("Manual mode: audio capture started, beginning speech buffering");
+        if let Err(e) = state_guard.start_manual_mode().await {
+            error!("Failed to start manual mode: {}", e);
+            return Err(anyhow::anyhow!("{}", e));
+        }
+
+        info!("Manual mode activated (MStart)");
+        Ok(Response::Ok)
+    }
+
+    /// Helper for manual mode complete.
+    /// Transcribes accumulated buffer, types output, clears buffer.
+    async fn handle_mcomplete(state: Arc<Mutex<DaemonState>>) -> anyhow::Result<Response> {
+        let state_guard = state.lock().await;
+        if let Err(e) = state_guard.complete_manual_mode().await {
+            error!("Manual complete failed: {}", e);
+            return Err(anyhow::anyhow!("{}", e));
+        }
+        info!("Manual mode: transcription triggered (MComplete)");
+        Ok(Response::Ok)
+    }
+
+    /// Helper for manual mode stop.
+    /// Stops audio capture, clears buffer, exits manual mode.
+    async fn handle_mstop(state: Arc<Mutex<DaemonState>>) -> anyhow::Result<Response> {
+        let mut state_guard = state.lock().await;
+        state_guard.stop_manual_mode().await;
+        if let Some(capture) = state_guard.audio_capture.lock().await.as_mut() {
+            capture.stop().await?;
+        }
+        *state_guard.audio_capture.lock().await = None;
+        *state_guard.audio_rx.lock().await = None;
+        state_guard.deactivate().await?;
+        info!("Manual mode stopped (MStop)");
+        Ok(Response::Ok)
+    }
+
     pub async fn execute_command(
         state: Arc<Mutex<DaemonState>>,
         command: Command,
@@ -287,6 +360,9 @@ impl DaemonServer {
                     Self::handle_start(state).await?
                 }
             }
+            Command::MStart => Self::handle_mstart(state).await?,
+            Command::MComplete => Self::handle_mcomplete(state).await?,
+            Command::MStop => Self::handle_mstop(state).await?,
         };
 
         Ok(response)
