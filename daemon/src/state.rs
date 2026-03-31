@@ -353,11 +353,6 @@ impl DaemonState {
     }
 
     pub async fn start_manual_mode(&self) -> anyhow::Result<()> {
-        let is_manual = *self.is_manual_mode.lock().await;
-        if is_manual {
-            return Err(anyhow::anyhow!("Already in manual mode"));
-        }
-
         let is_processing = *self.is_processing.lock().await;
         if is_processing {
             return Err(anyhow::anyhow!("Already processing audio"));

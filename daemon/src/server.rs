@@ -249,39 +249,66 @@ impl DaemonServer {
 
     /// Helper for manual mode start.
     /// Loads engines, starts audio capture, begins buffering speech segments.
+    /// If already in manual mode, discards current buffer and starts fresh.
     async fn handle_mstart(state: Arc<Mutex<DaemonState>>) -> anyhow::Result<Response> {
         let mut state_guard = state.lock().await;
         state_guard.activate().await?;
 
-        if *state_guard.is_processing.lock().await {
-            return Err(anyhow::anyhow!("Already processing audio"));
-        }
+        let already_in_manual = *state_guard.is_manual_mode.lock().await;
 
-        if state_guard.whisper_engine.lock().await.is_none() {
-            let mut whisper_engine = WhisperEngine::new_with_checksum_and_params(
-                state_guard.config.whisper.model_url.clone(),
-                state_guard.config.whisper.backend.clone(),
-                state_guard.config.whisper.model_checksum.clone(),
-                state_guard.config.whisper.min_audio_samples,
-                state_guard.config.whisper.sampling_strategy.clone(),
-            )?;
-            whisper_engine.load_model().await?;
-            *state_guard.whisper_engine.lock().await = Some(whisper_engine);
-            info!("Whisper engine loaded for manual mode");
-        }
+        if already_in_manual {
+            let mut buffer = state_guard.manual_speech_buffer.lock().await;
+            buffer.clear();
+            state_guard.stop_vad_processing().await;
+            *state_guard.is_manual_mode.lock().await = false;
+            *state_guard.is_processing.lock().await = false;
 
-        if state_guard.virtual_keyboard.lock().await.is_none() {
-            let virtual_keyboard = VirtualKeyboard::new()?;
-            *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
-        }
+            if let Some(capture) = state_guard.audio_capture.lock().await.as_mut() {
+                let _ = capture.stop().await;
+            }
+            *state_guard.audio_capture.lock().await = None;
+            *state_guard.audio_rx.lock().await = None;
 
-        let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(state_guard.config.buffer.broadcast_capacity);
-        let sample_rate = state_guard.config.audio.sample_rate;
-        let channels = state_guard.config.audio.channels;
-        let mut new_capture = AudioCapture::new_with_channels(sample_rate, channels)?;
-        new_capture.start(audio_tx)?;
-        *state_guard.audio_capture.lock().await = Some(new_capture);
-        *state_guard.audio_rx.lock().await = Some(audio_rx);
+            let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(state_guard.config.buffer.broadcast_capacity);
+            let sample_rate = state_guard.config.audio.sample_rate;
+            let channels = state_guard.config.audio.channels;
+            let mut new_capture = AudioCapture::new_with_channels(sample_rate, channels)?;
+            new_capture.start(audio_tx)?;
+            *state_guard.audio_capture.lock().await = Some(new_capture);
+            *state_guard.audio_rx.lock().await = Some(audio_rx);
+
+            info!("Manual mode: buffer discarded, audio capture restarted");
+        } else {
+            if *state_guard.is_processing.lock().await {
+                return Err(anyhow::anyhow!("Already processing audio"));
+            }
+
+            if state_guard.whisper_engine.lock().await.is_none() {
+                let mut whisper_engine = WhisperEngine::new_with_checksum_and_params(
+                    state_guard.config.whisper.model_url.clone(),
+                    state_guard.config.whisper.backend.clone(),
+                    state_guard.config.whisper.model_checksum.clone(),
+                    state_guard.config.whisper.min_audio_samples,
+                    state_guard.config.whisper.sampling_strategy.clone(),
+                )?;
+                whisper_engine.load_model().await?;
+                *state_guard.whisper_engine.lock().await = Some(whisper_engine);
+                info!("Whisper engine loaded for manual mode");
+            }
+
+            if state_guard.virtual_keyboard.lock().await.is_none() {
+                let virtual_keyboard = VirtualKeyboard::new()?;
+                *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+            }
+
+            let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(state_guard.config.buffer.broadcast_capacity);
+            let sample_rate = state_guard.config.audio.sample_rate;
+            let channels = state_guard.config.audio.channels;
+            let mut new_capture = AudioCapture::new_with_channels(sample_rate, channels)?;
+            new_capture.start(audio_tx)?;
+            *state_guard.audio_capture.lock().await = Some(new_capture);
+            *state_guard.audio_rx.lock().await = Some(audio_rx);
+        }
 
         debug!("Manual mode: audio capture started, beginning speech buffering");
         if let Err(e) = state_guard.start_manual_mode().await {
