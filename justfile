@@ -33,8 +33,10 @@ install: release
     @echo "Binaries installed to ~/.local/bin/"
 
 install-waybar: install
-    @just _create-waybar-script
-    @just _create-ironbar-script
+    @mkdir -p ~/.local/bin
+    cp waybar/ndict-waybar ~/.local/bin/ndict-waybar
+    cp waybar/ndict-ironbar ~/.local/bin/ndict-ironbar
+    chmod +x ~/.local/bin/ndict-waybar ~/.local/bin/ndict-ironbar
     @echo "Waybar/Ironbar scripts installed to ~/.local/bin/"
 
 install-systemd: install
@@ -43,27 +45,14 @@ install-systemd: install
     systemctl --user daemon-reload
     systemctl --user enable ndict.service
     systemctl --user start ndict.service
-    @if systemctl --user is-active --quiet ndict.service; then
-        echo "Daemon started successfully"
-    else
-        echo "Daemon failed to start"
-        exit 1
-    fi
+    @if systemctl --user is-active --quiet ndict.service; then echo "Daemon started successfully"; else echo "Daemon failed to start"; exit 1; fi
 
 install-all: install-waybar install-systemd
     @just _print-waybar-config
     @just _print-waybar-css
 
 install-config:
-    @CONFIG_DIR="$HOME/.config/ndict"
-    @CONFIG_FILE="$CONFIG_DIR/config.toml"
-    @if [ -f "$CONFIG_FILE" ]; then
-        echo "Config already exists at $CONFIG_FILE, skipping"
-    else
-        mkdir -p "$CONFIG_DIR"
-        cp config.example.toml "$CONFIG_FILE"
-        echo "Config installed to $CONFIG_FILE"
-    fi
+    @CONFIG_DIR="$HOME/.config/ndict"; CONFIG_FILE="$CONFIG_DIR/config.toml"; if [ -f "$CONFIG_FILE" ]; then echo "Config already exists at $CONFIG_FILE, skipping"; else mkdir -p "$CONFIG_DIR"; cp config.example.toml "$CONFIG_FILE"; echo "Config installed to $CONFIG_FILE"; fi
 
 # === SERVICE CONTROL ===
 
@@ -94,71 +83,6 @@ uninstall:
     echo "Uninstalled"
 
 # === INTERNAL RECIPES (prefixed with _) ===
-
-_create-waybar-script:
-    @cat > ~/.local/bin/ndict-waybar <<'WAYBAR_EOF'
-#!/bin/bash
-STATE_FILE="/tmp/ndict.state"
-if [ "$1" == "toggle" ]; then
-    if [ -f "$STATE_FILE" ]; then
-        $HOME/.local/bin/ndict stop
-        rm -f "$STATE_FILE"
-    else
-        $HOME/.local/bin/ndict start
-        touch "$STATE_FILE"
-    fi
-    pkill -RTMIN+8 waybar
-    exit 0
-fi
-if [ -f "$STATE_FILE" ]; then
-    echo '{"text": "", "tooltip": "NDict: Listening...", "class": "recording", "alt": "recording"}'
-else
-    echo '{"text": "", "tooltip": "NDict: Idle", "class": "idle", "alt": "idle"}'
-fi
-WAYBAR_EOF
-    @chmod +x ~/.local/bin/ndict-waybar
-
-_create-ironbar-script:
-    @cat > ~/.local/bin/ndict-ironbar <<'IRONBAR_EOF'
-#!/bin/bash
-STATE_FILE="/tmp/ndict.state"
-PIPE_FILE="/tmp/ndict.pipe"
-COLOR_REC="#f7768e"
-COLOR_IDLE="#7aa2f7"
-get_status_string() {
-    if [ -f "$STATE_FILE" ]; then
-        echo "<span foreground='$COLOR_REC' weight='bold'> Listening...</span>"
-    else
-        echo "<span foreground='$COLOR_IDLE' weight='bold'> Idle</span>"
-    fi
-}
-case "$1" in
-    toggle)
-        if [ -f "$STATE_FILE" ]; then
-            $HOME/.local/bin/ndict stop
-            rm -f "$STATE_FILE"
-        else
-            $HOME/.local/bin/ndict start
-            touch "$STATE_FILE"
-        fi
-        if [ -p "$PIPE_FILE" ]; then
-            get_status_string > "$PIPE_FILE" &
-        fi
-        exit 0
-        ;;
-    *)
-        if [ -e "$PIPE_FILE" ] && [ ! -p "$PIPE_FILE" ]; then
-            rm -f "$PIPE_FILE"
-        fi
-        if [ ! -p "$PIPE_FILE" ]; then
-            mkfifo "$PIPE_FILE"
-        fi
-        get_status_string
-        tail -f "$PIPE_FILE"
-        ;;
-esac
-IRONBAR_EOF
-    @chmod +x ~/.local/bin/ndict-ironbar
 
 _print-waybar-config:
     @echo ""

@@ -1,0 +1,39 @@
+#!/bin/bash
+
+STATE_FILE="/tmp/ndict.state"
+PIPE_FILE="/tmp/ndict.pipe"
+
+COLOR_REC="#f7768e"
+COLOR_IDLE="#7aa2f7"
+
+get_status_string() {
+    if [ -f "$STATE_FILE" ]; then
+        echo "<span foreground='$COLOR_REC' weight='bold'> Listening...</span>"
+    else
+        echo "<span foreground='$COLOR_IDLE' weight='bold'> Idle</span>"
+    fi
+}
+
+case "$1" in
+    toggle)
+        if [ -f "$STATE_FILE" ]; then
+            $HOME/.local/bin/ndict mstop
+        else
+            $HOME/.local/bin/ndict mstart
+        fi
+        if [ -p "$PIPE_FILE" ]; then
+            get_status_string > "$PIPE_FILE" &
+        fi
+        exit 0
+        ;;
+    *)
+        if [ -e "$PIPE_FILE" ] && [ ! -p "$PIPE_FILE" ]; then
+            rm -f "$PIPE_FILE"
+        fi
+        if [ ! -p "$PIPE_FILE" ]; then
+            mkfifo "$PIPE_FILE"
+        fi
+        get_status_string
+        tail -f "$PIPE_FILE"
+        ;;
+esac

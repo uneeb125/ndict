@@ -1,17 +1,35 @@
- use shared::ipc::{Command, Response};
- use std::path::PathBuf;
- use std::sync::Arc;
- use tokio::io::{AsyncReadExt, AsyncWriteExt};
- use tokio::net::UnixListener;
- use tokio::sync::Mutex;
- use tokio::time::{timeout, Duration};
- use tracing::{debug, error, info, warn};
+use shared::ipc::{Command, Response};
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixListener;
+use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
+use tracing::{debug, error, info, warn};
 
 use crate::audio::capture::AudioCapture;
 use crate::output::keyboard::VirtualKeyboard;
 use crate::state::DaemonState;
- use crate::transcription::engine::WhisperEngine;
- use crate::transcription::streaming_engine::StreamingEngine;
+use crate::transcription::engine::WhisperEngine;
+use crate::transcription::streaming_engine::StreamingEngine;
+
+fn get_state_file_path() -> PathBuf {
+    if let Some(runtime_dir) = dirs::runtime_dir() {
+        runtime_dir.join("ndict.state")
+    } else {
+        PathBuf::from("/tmp/ndict.state")
+    }
+}
+
+fn write_state_file() {
+    let path = get_state_file_path();
+    let _ = std::fs::write(&path, "");
+}
+
+fn remove_state_file() {
+    let path = get_state_file_path();
+    let _ = std::fs::remove_file(&path);
+}
 
  /// Timeout for accepting new connections (10 seconds)
  const ACCEPT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -161,6 +179,7 @@ impl DaemonServer {
 
         let mode = if use_streaming { "streaming" } else { "batch" };
         info!("Activated audio capture ({} mode)", mode);
+        write_state_file();
         Ok(Response::Ok)
     }
 
@@ -175,6 +194,7 @@ impl DaemonServer {
         *state_guard.audio_capture.lock().await = None;
         *state_guard.audio_rx.lock().await = None;
         state_guard.deactivate().await?;
+        remove_state_file();
         info!("Stopped audio processing, model kept in memory");
         Ok(Response::Ok)
     }
@@ -317,6 +337,7 @@ impl DaemonServer {
         }
 
         info!("Manual mode activated (MStart)");
+        write_state_file();
         Ok(Response::Ok)
     }
 
@@ -343,6 +364,7 @@ impl DaemonServer {
         *state_guard.audio_capture.lock().await = None;
         *state_guard.audio_rx.lock().await = None;
         state_guard.deactivate().await?;
+        remove_state_file();
         info!("Manual mode stopped (MStop)");
         Ok(Response::Ok)
     }

@@ -1,0 +1,30 @@
+#!/bin/bash
+
+STATE_FILE="/tmp/ndict.state"
+
+case "$1" in
+    start)
+        $HOME/.local/bin/ndict mstart
+        ;;
+    complete)
+        $HOME/.local/bin/ndict mcomplete
+        ;;
+    stop)
+        $HOME/.local/bin/ndict mstop
+        ;;
+    toggle)
+        if [ -f "$STATE_FILE" ]; then
+            $HOME/.local/bin/ndict mstop
+        else
+            $HOME/.local/bin/ndict mstart
+        fi
+        ;;
+esac
+
+pkill -RTMIN+8 waybar
+
+if [ -f "$STATE_FILE" ]; then
+    echo '{"text": "", "tooltip": "NDict: Listening...", "class": "recording", "alt": "recording"}'
+else
+    echo '{"text": "", "tooltip": "NDict: Idle", "class": "idle", "alt": "idle"}'
+fi
