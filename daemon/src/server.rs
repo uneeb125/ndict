@@ -14,11 +14,7 @@ use crate::transcription::engine::WhisperEngine;
 use crate::transcription::streaming_engine::StreamingEngine;
 
 fn get_state_file_path() -> PathBuf {
-    if let Some(runtime_dir) = dirs::runtime_dir() {
-        runtime_dir.join("ndict.state")
-    } else {
-        PathBuf::from("/tmp/ndict.state")
-    }
+    PathBuf::from("/tmp/ndict.state")
 }
 
 fn write_state_file() {

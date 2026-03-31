@@ -10,7 +10,7 @@ case "$1" in
         $HOME/.local/bin/ndict m-complete
         ;;
     stop)
-        $HOME/.local/bin/ndict mstop
+        $HOME/.local/bin/ndict m-stop
         ;;
     toggle)
         if [ -f "$STATE_FILE" ]; then
@@ -21,7 +21,7 @@ case "$1" in
         ;;
 esac
 
-pkill -RTMIN+8 waybar
+kill -42 $(pgrep -x waybar) 2>/dev/null || true
 
 if [ -f "$STATE_FILE" ]; then
     echo '{"text": "", "tooltip": "NDict: Listening...", "class": "recording", "alt": "recording"}'
