@@ -1,16 +1,27 @@
 [Unit]
 Description=ndict - Speech to Text Daemon
-After=graphical-session.target
+# Wait for sound, but we handle the Wayland wait in the Service section
+After=pipewire.service pulseaudio.service
 
 [Service]
 Type=simple
-ExecStartPre=/bin/sh -c 'mkdir -p ~/.local/share/ndict'
-ExecStart=/bin/sh -c '/home/uneeb/.local/bin/ndictd'
-ExecStop=/bin/sh -c 'pkill -f ndictd; rm -f $XDG_RUNTIME_DIR/ndictd.sock 2>/dev/null || rm -f /tmp/ndictd.sock'
+
+# 1. HARDCODED WAYLAND-1 ENVIRONMENT
+Environment=WAYLAND_DISPLAY=wayland-1
+Environment=DISPLAY=:1
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+
+# 2. SMART WAIT: This loop pauses the service until Niri creates the wayland-1 socket.
+# It checks every 0.5 seconds and won't proceed until the display is ready.
+ExecStartPre=/bin/sh -c 'while [ ! -S "$XDG_RUNTIME_DIR/wayland-1" ]; do sleep 0.5; done'
+
+# 3. CLEANUP: Ensure folders exist and old sockets are gone
+ExecStartPre=/bin/sh -c 'mkdir -p %h/.local/share/ndict; rm -f $XDG_RUNTIME_DIR/ndictd.sock /tmp/ndictd.sock'
+
+# 4. LAUNCH
+ExecStart=%h/.local/bin/ndictd
 Restart=on-failure
 RestartSec=5
-AmbientCapabilities=CAP_SYS_INPUT
-PassEnvironment=WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
 
 [Install]
 WantedBy=default.target
