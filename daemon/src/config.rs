@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(default = "Config::default")]
 pub struct Config {
+    #[serde(default)]
+    pub log_level: String,
     #[serde(default)]
     pub audio: AudioConfig,
     #[serde(default)]
@@ -167,6 +168,10 @@ fn default_broadcast_capacity() -> usize {
     100
 }
 
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
 pub struct OutputConfig {
     #[serde(default = "default_typing_mode")]
@@ -248,6 +253,7 @@ fn default_model_download_timeout() -> u64 {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            log_level: default_log_level(),
             audio: AudioConfig {
                 device: "default".to_string(),
                 sample_rate: 16000,

@@ -20,4 +20,11 @@ clap = { version = "4.5", features = ["derive"] }
 [env]
 HIP_ARCH="gfx1100"
 AMDGPU_TARGETS="gfx1100"
-CXXFLAGS="-D_GLIBCXX_ASSERTIONS=0" 
+CXXFLAGS="-D_GLIBCXX_ASSERTIONS=0"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+strip = "symbols"
+panic = "abort" 
