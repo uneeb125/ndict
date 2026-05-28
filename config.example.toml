@@ -95,3 +95,23 @@ socket_operation_timeout_seconds = 10
 # Model download timeout in seconds
 # How long to wait for Whisper model download to complete before giving up
 model_download_timeout_seconds = 300
+
+[llm]
+# Enable LLM-based post-processing of transcribed text
+# When enabled, transcription output is sent to a local LLM (e.g. Ollama) for cleanup:
+# grammar fixes, filler word removal (um, uh, like), rambling filtering, etc.
+# Default: false (opt-in)
+enabled = false
+# Base URL for the LLM API (OpenAI-compatible /v1/chat/completions)
+# Default: http://localhost:11434 (Ollama default)
+api_url = "http://localhost:11434"
+# Model name to use for cleanup (must be available at the API endpoint)
+# For Ollama, run: ollama pull qwen2.5:0.5b (or any model)
+model = "qwen2.5:0.5b"
+# System prompt sent to the LLM - customizes how text is cleaned
+# The transcribed text is sent as the user message with prefix "Raw transcription:"
+# Must produce valid JSON with a "cleaned_text" field
+system_prompt = "Clean up the following raw transcription. Fix grammar and punctuation. Remove filler words (um, uh, er, like, you know, I mean). Remove rambling and false starts. Make it coherent and natural. Preserve the original meaning. Output ONLY valid JSON: {\"cleaned_text\": \"...\"}"
+# Timeout for LLM API calls in seconds
+# If the LLM times out, falls back to raw transcription
+timeout_seconds = 10

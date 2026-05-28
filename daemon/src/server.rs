@@ -11,6 +11,7 @@ use crate::audio::capture::AudioCapture;
 use crate::output::keyboard::VirtualKeyboard;
 use crate::state::DaemonState;
 use crate::transcription::engine::WhisperEngine;
+use crate::transcription::llm::LlmCleaner;
 use crate::transcription::streaming_engine::StreamingEngine;
 
 fn get_state_file_path() -> PathBuf {
@@ -142,6 +143,12 @@ impl DaemonServer {
         if state_guard.virtual_keyboard.lock().await.is_none() {
             let virtual_keyboard = VirtualKeyboard::new()?;
             *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+        }
+
+        if state_guard.config.llm.enabled && state_guard.llm_cleaner.lock().await.is_none() {
+            let llm_cleaner = LlmCleaner::new(&state_guard.config.llm);
+            *state_guard.llm_cleaner.lock().await = Some(llm_cleaner);
+            info!("LLM cleaner initialized");
         }
 
         let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(state_guard.config.buffer.broadcast_capacity);
@@ -285,6 +292,12 @@ impl DaemonServer {
             *state_guard.audio_capture.lock().await = None;
             *state_guard.audio_rx.lock().await = None;
 
+            if state_guard.config.llm.enabled && state_guard.llm_cleaner.lock().await.is_none() {
+                let llm_cleaner = LlmCleaner::new(&state_guard.config.llm);
+                *state_guard.llm_cleaner.lock().await = Some(llm_cleaner);
+                info!("LLM cleaner initialized for manual mode (restart)");
+            }
+
             let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(state_guard.config.buffer.broadcast_capacity);
             let sample_rate = state_guard.config.audio.sample_rate;
             let channels = state_guard.config.audio.channels;
@@ -315,6 +328,12 @@ impl DaemonServer {
             if state_guard.virtual_keyboard.lock().await.is_none() {
                 let virtual_keyboard = VirtualKeyboard::new()?;
                 *state_guard.virtual_keyboard.lock().await = Some(virtual_keyboard);
+            }
+
+            if state_guard.config.llm.enabled && state_guard.llm_cleaner.lock().await.is_none() {
+                let llm_cleaner = LlmCleaner::new(&state_guard.config.llm);
+                *state_guard.llm_cleaner.lock().await = Some(llm_cleaner);
+                info!("LLM cleaner initialized for manual mode");
             }
 
             let (audio_tx, audio_rx) = tokio::sync::broadcast::channel(state_guard.config.buffer.broadcast_capacity);

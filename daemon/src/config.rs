@@ -22,6 +22,8 @@ pub struct Config {
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub timeouts: TimeoutsConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
@@ -250,6 +252,48 @@ fn default_model_download_timeout() -> u64 {
     300
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct LlmConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_llm_api_url")]
+    pub api_url: String,
+    #[serde(default = "default_llm_model")]
+    pub model: String,
+    #[serde(default = "default_llm_system_prompt")]
+    pub system_prompt: String,
+    #[serde(default = "default_llm_timeout")]
+    pub timeout_seconds: u64,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_url: default_llm_api_url(),
+            model: default_llm_model(),
+            system_prompt: default_llm_system_prompt(),
+            timeout_seconds: default_llm_timeout(),
+        }
+    }
+}
+
+fn default_llm_api_url() -> String {
+    "http://localhost:11434".to_string()
+}
+
+fn default_llm_model() -> String {
+    "qwen2.5:0.5b".to_string()
+}
+
+fn default_llm_system_prompt() -> String {
+    "Clean up the following raw transcription. Fix grammar and punctuation. Remove filler words (um, uh, er, like, you know, I mean). Remove rambling and false starts. Make it coherent and natural. Preserve the original meaning. Output ONLY valid JSON: {\"cleaned_text\": \"...\"}".to_string()
+}
+
+fn default_llm_timeout() -> u64 {
+    10
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -302,6 +346,13 @@ impl Default for Config {
                 socket_connect_timeout_seconds: 5,
                 socket_operation_timeout_seconds: 10,
                 model_download_timeout_seconds: 300,
+            },
+            llm: LlmConfig {
+                enabled: false,
+                api_url: "http://localhost:11434".to_string(),
+            model: default_llm_model(),
+            system_prompt: default_llm_system_prompt(),
+                timeout_seconds: 10,
             },
         }
     }
@@ -396,6 +447,7 @@ mod tests {
         assert!(toml_str.contains("[output]"));
         assert!(toml_str.contains("[rate_limit]"));
         assert!(toml_str.contains("[timeouts]"));
+        assert!(toml_str.contains("[llm]"));
     }
 
     #[test]
@@ -411,6 +463,7 @@ mod tests {
         assert_eq!(config.buffer, parsed.buffer);
         assert_eq!(config.output, parsed.output);
         assert_eq!(config.timeouts, parsed.timeouts);
+        assert_eq!(config.llm, parsed.llm);
     }
 
     #[test]
@@ -745,5 +798,75 @@ mod tests {
         // Should use default values for missing fields
         assert_eq!(config.whisper.min_audio_samples, 18000);
         assert_eq!(config.whisper.sampling_strategy, "greedy");
+    }
+
+    #[test]
+    fn test_default_llm_config() {
+        let config = Config::default();
+        assert_eq!(config.llm.enabled, false);
+        assert_eq!(config.llm.api_url, "http://localhost:11434");
+        assert_eq!(config.llm.model, "qwen2.5:0.5b");
+        assert_eq!(config.llm.timeout_seconds, 10);
+        assert!(config.llm.system_prompt.contains("Output ONLY valid JSON"));
+    }
+
+    #[test]
+    fn test_llm_config_with_custom_values() {
+        let toml_str = r#"
+            [llm]
+            enabled = true
+            api_url = "http://192.168.1.100:1234"
+            model = "mistral"
+            system_prompt = "Custom prompt"
+            timeout_seconds = 20
+        "#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.llm.enabled, true);
+        assert_eq!(config.llm.api_url, "http://192.168.1.100:1234");
+        assert_eq!(config.llm.model, "mistral");
+        assert_eq!(config.llm.system_prompt, "Custom prompt");
+        assert_eq!(config.llm.timeout_seconds, 20);
+    }
+
+    #[test]
+    fn test_llm_config_with_partial_values() {
+        let toml_str = r#"
+            [llm]
+            enabled = true
+            model = "phi3"
+        "#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.llm.enabled, true);
+        assert_eq!(config.llm.model, "phi3");
+        assert_eq!(config.llm.api_url, "http://localhost:11434");
+        assert_eq!(config.llm.timeout_seconds, 10);
+    }
+
+    #[test]
+    fn test_llm_config_missing_section_uses_defaults() {
+        let toml_str = r#"
+            [audio]
+            device = "test"
+        "#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.llm.enabled, false);
+        assert_eq!(config.llm.api_url, "http://localhost:11434");
+        assert_eq!(config.llm.model, "qwen2.5:0.5b");
+        assert_eq!(config.llm.timeout_seconds, 10);
+    }
+
+    #[test]
+    fn test_default_llm_api_url() {
+        assert_eq!(default_llm_api_url(), "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_default_llm_model() {
+        assert_eq!(default_llm_model(), "qwen2.5:0.5b");
+    }
+
+    #[test]
+    fn test_default_llm_timeout() {
+        assert_eq!(default_llm_timeout(), 10);
     }
 }

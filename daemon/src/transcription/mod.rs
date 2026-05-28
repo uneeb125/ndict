@@ -1,4 +1,5 @@
 pub mod engine;
+pub mod llm;
 pub mod streaming_engine;
 
 pub fn post_process_transcription(text: &str) -> String {

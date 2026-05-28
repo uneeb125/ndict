@@ -4,6 +4,7 @@ use crate::output::VirtualKeyboard;
 use crate::rate_limit::CommandRateLimiter;
 use crate::transcription;
 use crate::transcription::engine::WhisperEngine;
+use crate::transcription::llm::LlmCleaner;
 use crate::transcription::streaming_engine::StreamingEngine;
 use crate::vad::speech_detector::SpeechDetector;
 use shared::ipc::StatusInfo;
@@ -24,6 +25,7 @@ pub struct DaemonState {
     pub whisper_engine: Arc<Mutex<Option<WhisperEngine>>>,
     pub streaming_engine: Arc<Mutex<Option<StreamingEngine>>>,
     pub virtual_keyboard: Arc<Mutex<Option<VirtualKeyboard>>>,
+    pub llm_cleaner: Arc<Mutex<Option<LlmCleaner>>>,
     pub vad_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub streaming_task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     pub rate_limiter: Arc<CommandRateLimiter>,
@@ -49,6 +51,7 @@ impl DaemonState {
             whisper_engine: Arc::new(Mutex::new(None)),
             streaming_engine: Arc::new(Mutex::new(None)),
             virtual_keyboard: Arc::new(Mutex::new(None)),
+            llm_cleaner: Arc::new(Mutex::new(None)),
             vad_task_handle: Arc::new(Mutex::new(None)),
             streaming_task_handle: Arc::new(Mutex::new(None)),
             rate_limiter,
@@ -91,6 +94,7 @@ impl DaemonState {
             self.audio_rx.lock().await.take();
         let whisper_engine = self.whisper_engine.clone();
         let virtual_keyboard = self.virtual_keyboard.clone();
+        let llm_cleaner = self.llm_cleaner.clone();
         let language = self.language.clone();
         let config = self.config.clone();
         let vad_threshold_start = self.config.vad.threshold_start;
@@ -138,8 +142,10 @@ impl DaemonState {
 
                             let engine_ref = whisper_engine.clone();
                             let keyboard_ref = virtual_keyboard.clone();
+                            let llm_cleaner_ref = llm_cleaner.clone();
                             let lang = language.lock().await.clone();
                             let timeout_config = config.timeouts.clone();
+                            let llm_enabled = config.llm.enabled;
                             tokio::spawn(async move {
                                 tracing::debug!(
                                     "Starting Whisper transcription for {} samples",
@@ -161,25 +167,53 @@ impl DaemonState {
 
                                 match transcription_result {
                                     Ok(Ok(text)) => {
-                                        tracing::debug!("Finished Whisper transcription");
+                                        tracing::info!("Whisper raw: '{}'", text);
                                         let post_processed =
                                             transcription::post_process_transcription(&text);
-                                        tracing::info!(
-                                            "Transcription result: '{}'",
+                                        tracing::info!("Post-processed: '{}'", post_processed);
+
+                                        let final_text = if llm_enabled {
+                                            match llm_cleaner_ref.lock().await.as_ref() {
+                                                Some(cleaner) => {
+                                                    match cleaner.clean(&post_processed).await {
+                                                        Ok(cleaned) => {
+                                                            tracing::info!(
+                                                                "LLM output: '{}'",
+                                                                cleaned
+                                                            );
+                                                            cleaned
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "LLM cleanup failed, using raw transcription: {}",
+                                                                e
+                                                            );
+                                                            post_processed
+                                                        }
+                                                    }
+                                                }
+                                                None => {
+                                                    tracing::warn!("LLM cleaner not initialized");
+                                                    post_processed
+                                                }
+                                            }
+                                        } else {
                                             post_processed
-                                        );
+                                        };
+
+                                        tracing::info!("Typing: '{}'", final_text);
 
                                         let mut keyboard_lock = keyboard_ref.lock().await;
                                         if let Some(ref mut keyboard) = *keyboard_lock {
                                             tracing::debug!(
                                                 "Starting keyboard typing for: '{}'",
-                                                post_processed
+                                                final_text
                                             );
                                             let typing_result = tokio::time::timeout(
                                                 tokio::time::Duration::from_secs(timeout_config.keyboard_timeout_seconds),
                                                 async {
                                                     let result =
-                                                        keyboard.type_text(&post_processed).await;
+                                                        keyboard.type_text(&final_text).await;
                                                     Ok::<_, anyhow::Error>(result)
                                                 },
                                             )
@@ -245,6 +279,7 @@ impl DaemonState {
             self.audio_rx.lock().await.take();
         let streaming_engine = self.streaming_engine.clone();
         let virtual_keyboard = self.virtual_keyboard.clone();
+        let llm_cleaner = self.llm_cleaner.clone();
         let config = self.config.clone();
 
         if audio_rx_option.is_none() {
@@ -268,22 +303,52 @@ impl DaemonState {
                         if let Some(ref mut engine) = *engine_lock {
                             match engine.send_audio(&samples) {
                             Ok(Some(text)) => {
-                                tracing::info!("Streaming transcription: '{}'", text);
+                                tracing::info!("Whisper raw: '{}'", text);
 
                                 let post_processed =
                                     transcription::post_process_transcription(&text);
+                                tracing::info!("Post-processed: '{}'", post_processed);
+
+                                let final_text = if config.llm.enabled {
+                                    match llm_cleaner.lock().await.as_ref() {
+                                        Some(cleaner) => {
+                                            match cleaner.clean(&post_processed).await {
+                                                Ok(cleaned) => {
+                                                    tracing::info!(
+                                                        "LLM output: '{}'",
+                                                        cleaned
+                                                    );
+                                                    cleaned
+                                                }
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "LLM cleanup failed, using raw transcription: {}",
+                                                        e
+                                                    );
+                                                    post_processed
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            tracing::warn!("LLM cleaner not initialized");
+                                            post_processed
+                                        }
+                                    }
+                                } else {
+                                    post_processed
+                                };
 
                                 let mut keyboard_lock = virtual_keyboard.lock().await;
                                 if let Some(ref mut keyboard) = *keyboard_lock {
                                     tracing::debug!(
                                         "Starting keyboard typing for: '{}'",
-                                        post_processed
+                                        final_text
                                     );
                                     let typing_result = tokio::time::timeout(
                                         tokio::time::Duration::from_secs(config.timeouts.keyboard_timeout_seconds),
                                         async {
                                             let result =
-                                                keyboard.type_text(&post_processed).await;
+                                                keyboard.type_text(&final_text).await;
                                             Ok::<_, anyhow::Error>(result)
                                         },
                                     )
@@ -441,8 +506,10 @@ impl DaemonState {
 
         let whisper_engine = self.whisper_engine.clone();
         let virtual_keyboard = self.virtual_keyboard.clone();
+        let llm_cleaner = self.llm_cleaner.clone();
         let language = self.language.lock().await.clone();
         let timeout_config = self.config.timeouts.clone();
+        let llm_enabled = self.config.llm.enabled;
 
         tokio::spawn(async move {
             let transcription_result = tokio::time::timeout(
@@ -460,16 +527,47 @@ impl DaemonState {
 
             match transcription_result {
                 Ok(Ok(text)) => {
-                    tracing::debug!("Manual mode transcription complete");
+                    tracing::info!("Whisper raw (manual): '{}'", text);
                     let post_processed = transcription::post_process_transcription(&text);
-                    tracing::info!("Manual transcription result: '{}'", post_processed);
+                    tracing::info!("Post-processed (manual): '{}'", post_processed);
+
+                    let final_text = if llm_enabled {
+                        match llm_cleaner.lock().await.as_ref() {
+                            Some(cleaner) => {
+                                match cleaner.clean(&post_processed).await {
+                                    Ok(cleaned) => {
+                                        tracing::info!(
+                                            "LLM output (manual): '{}'",
+                                            cleaned
+                                        );
+                                        cleaned
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "LLM cleanup failed, using raw transcription: {}",
+                                            e
+                                        );
+                                        post_processed
+                                    }
+                                }
+                            }
+                            None => {
+                                tracing::warn!("LLM cleaner not initialized");
+                                post_processed
+                            }
+                        }
+                    } else {
+                        post_processed
+                    };
+
+                    tracing::info!("Typing (manual): '{}'", final_text);
 
                     let mut keyboard_lock = virtual_keyboard.lock().await;
                     if let Some(ref mut keyboard) = *keyboard_lock {
                         let typing_result = tokio::time::timeout(
                             tokio::time::Duration::from_secs(timeout_config.keyboard_timeout_seconds),
                             async {
-                                keyboard.type_text(&post_processed).await
+                                keyboard.type_text(&final_text).await
                             },
                         )
                         .await;
