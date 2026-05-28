@@ -485,7 +485,7 @@ impl DaemonState {
         Ok(())
     }
 
-    pub async fn complete_manual_mode(&self) -> anyhow::Result<()> {
+    pub async fn complete_manual_mode(&self, skip_post_process: bool) -> anyhow::Result<()> {
         let is_manual = *self.is_manual_mode.lock().await;
         if !is_manual {
             return Err(anyhow::anyhow!("Not in manual mode"));
@@ -528,36 +528,41 @@ impl DaemonState {
             match transcription_result {
                 Ok(Ok(text)) => {
                     tracing::info!("Whisper raw (manual): '{}'", text);
-                    let post_processed = transcription::post_process_transcription(&text);
-                    tracing::info!("Post-processed (manual): '{}'", post_processed);
+                    let final_text = if skip_post_process {
+                        tracing::info!("Skipping post-process, using raw text");
+                        text
+                    } else {
+                        let post_processed = transcription::post_process_transcription(&text);
+                        tracing::info!("Post-processed (manual): '{}'", post_processed);
 
-                    let final_text = if llm_enabled {
-                        match llm_cleaner.lock().await.as_ref() {
-                            Some(cleaner) => {
-                                match cleaner.clean(&post_processed).await {
-                                    Ok(cleaned) => {
-                                        tracing::info!(
-                                            "LLM output (manual): '{}'",
+                        if llm_enabled {
+                            match llm_cleaner.lock().await.as_ref() {
+                                Some(cleaner) => {
+                                    match cleaner.clean(&post_processed).await {
+                                        Ok(cleaned) => {
+                                            tracing::info!(
+                                                "LLM output (manual): '{}'",
+                                                cleaned
+                                            );
                                             cleaned
-                                        );
-                                        cleaned
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "LLM cleanup failed, using raw transcription: {}",
-                                            e
-                                        );
-                                        post_processed
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "LLM cleanup failed, using raw transcription: {}",
+                                                e
+                                            );
+                                            post_processed
+                                        }
                                     }
                                 }
+                                None => {
+                                    tracing::warn!("LLM cleaner not initialized");
+                                    post_processed
+                                }
                             }
-                            None => {
-                                tracing::warn!("LLM cleaner not initialized");
-                                post_processed
-                            }
+                        } else {
+                            post_processed
                         }
-                    } else {
-                        post_processed
                     };
 
                     tracing::info!("Typing (manual): '{}'", final_text);

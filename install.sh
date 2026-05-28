@@ -73,12 +73,24 @@ if [ "\$1" == "toggle" ]; then
         $HOME/.local/bin/ndict stop
         rm -f "\$STATE_FILE"
     else
-        # Currently stopped, so START it
+        # Currently started, so START it
         $HOME/.local/bin/ndict start
         touch "\$STATE_FILE"
     fi
     # Send signal to waybar to update immediately (Signal 8)
     pkill -RTMIN+8 waybar
+    exit 0
+fi
+
+# FUNCTION: Manual mode complete (post-processed)
+if [ "\$1" == "complete" ]; then
+    $HOME/.local/bin/ndict m-complete
+    exit 0
+fi
+
+# FUNCTION: Manual mode complete raw (no post-processing)
+if [ "\$1" == "raw" ]; then
+    $HOME/.local/bin/ndict m-complete-raw
     exit 0
 fi
 
@@ -120,7 +132,7 @@ get_status_string() {
 case "$1" in
     toggle)
         # --- TOGGLE MODE (Runs on Click) ---
-        
+
         # 1. Toggle the state file and run the actual logic
         if [ -f "$STATE_FILE" ]; then
             $HOME/.local/bin/ndict stop
@@ -137,16 +149,26 @@ case "$1" in
         fi
         exit 0
         ;;
-    
+
+    complete)
+        $HOME/.local/bin/ndict m-complete
+        exit 0
+        ;;
+
+    raw)
+        $HOME/.local/bin/ndict m-complete-raw
+        exit 0
+        ;;
+
     *)
         # --- WATCH MODE (Runs on Ironbar Startup) ---
-        
+
         # 1. Ensure the Named Pipe exists
         # Clean up old pipe if it's not a pipe file (e.g. stale normal file)
         if [ -e "$PIPE_FILE" ] && [ ! -p "$PIPE_FILE" ]; then
             rm -f "$PIPE_FILE"
         fi
-        
+
         # Create the pipe if missing
         if [ ! -p "$PIPE_FILE" ]; then
             mkfifo "$PIPE_FILE"
@@ -259,6 +281,8 @@ print_code json <<EOF
     "interval": 1,
     "exec": "$DEST_BIN_DIR/ndict-waybar",
     "on-click": "$DEST_BIN_DIR/ndict-waybar toggle",
+    "on-click-right": "$DEST_BIN_DIR/ndict-waybar raw",
+    "on-click-middle": "$DEST_BIN_DIR/ndict-waybar complete",
     "signal": 8
 }
 EOF

@@ -360,11 +360,23 @@ impl DaemonServer {
     /// Transcribes accumulated buffer, types output, clears buffer.
     async fn handle_mcomplete(state: Arc<Mutex<DaemonState>>) -> anyhow::Result<Response> {
         let state_guard = state.lock().await;
-        if let Err(e) = state_guard.complete_manual_mode().await {
+        if let Err(e) = state_guard.complete_manual_mode(false).await {
             error!("Manual complete failed: {}", e);
             return Err(anyhow::anyhow!("{}", e));
         }
         info!("Manual mode: transcription triggered (MComplete)");
+        Ok(Response::Ok)
+    }
+
+    /// Helper for manual mode complete raw.
+    /// Transcribes accumulated buffer, types raw output (no post-processing), clears buffer.
+    async fn handle_mcomplete_raw(state: Arc<Mutex<DaemonState>>) -> anyhow::Result<Response> {
+        let state_guard = state.lock().await;
+        if let Err(e) = state_guard.complete_manual_mode(true).await {
+            error!("Manual complete raw failed: {}", e);
+            return Err(anyhow::anyhow!("{}", e));
+        }
+        info!("Manual mode: raw transcription triggered (MCompleteRaw)");
         Ok(Response::Ok)
     }
 
@@ -426,6 +438,7 @@ impl DaemonServer {
             }
             Command::MStart => Self::handle_mstart(state).await?,
             Command::MComplete => Self::handle_mcomplete(state).await?,
+            Command::MCompleteRaw => Self::handle_mcomplete_raw(state).await?,
             Command::MStop => Self::handle_mstop(state).await?,
         };
 

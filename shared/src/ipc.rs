@@ -12,6 +12,7 @@ pub enum Command {
     Toggle,
     MStart,
     MComplete,
+    MCompleteRaw,
     MStop,
 }
 
@@ -75,6 +76,7 @@ mod tests {
             Command::Toggle,
             Command::MStart,
             Command::MComplete,
+            Command::MCompleteRaw,
             Command::MStop,
         ];
         for cmd in commands {

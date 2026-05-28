@@ -24,6 +24,7 @@ enum Commands {
     Toggle,
     MStart,
     MComplete,
+    MCompleteRaw,
     MStop,
 }
 
@@ -42,6 +43,7 @@ async fn main() -> Result<()> {
         Commands::Toggle => Command::Toggle,
         Commands::MStart => Command::MStart,
         Commands::MComplete => Command::MComplete,
+        Commands::MCompleteRaw => Command::MCompleteRaw,
         Commands::MStop => Command::MStop,
     };
 
