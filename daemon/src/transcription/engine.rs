@@ -386,14 +386,12 @@ impl WhisperEngine {
             .build()
             .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
 
-        // Send HEAD request to get file size
+        // Send HEAD request to check ETag (HuggingFace CDN may not return Content-Length on HEAD)
         let head_response = client
             .head(model_url)
             .send()
             .await
             .map_err(|e| anyhow::anyhow!("HEAD request failed: {}", e))?;
-
-        let expected_size = head_response.content_length();
 
         // Check for ETag (optional, for HuggingFace)
         let etag = head_response.headers().get("etag").and_then(|v| v.to_str().ok());
@@ -498,8 +496,8 @@ impl WhisperEngine {
         })?;
         drop(file);
 
-        // Verify file size matches expected size from HEAD request
-        if let Some(expected) = expected_size {
+        // Verify file size matches expected size from GET response (HEAD may return 0 from some CDNs)
+        if let Some(expected) = total_bytes {
             let metadata = tokio::fs::metadata(temp_path).await?;
             let actual_size = metadata.len();
 
